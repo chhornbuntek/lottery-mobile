@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'ក្បាលបញ្ជី.dart';
 import 'បញ្ជី.dart';
 import 'ភ្នាល់.dart';
+import 'កម្រៃ.dart';
+import 'ម៉ោងបិទ.dart';
 
 class MainScreen extends StatelessWidget {
   const MainScreen({super.key});
@@ -9,9 +11,9 @@ class MainScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.green,
+      backgroundColor: Color(0xFF2C5F5F),
       appBar: AppBar(
-        backgroundColor: Colors.green,
+        backgroundColor: Color(0xFF2C5F5F),
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.menu, color: Colors.white),
@@ -160,6 +162,20 @@ class MainScreen extends StatelessWidget {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (context) => const BettingScreen()),
+              );
+            } else if (label == 'កម្រៃ') {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const CommissionScreen(),
+                ),
+              );
+            } else if (label == 'ម៉ោងបិទ') {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const ClosingTimeScreen(),
+                ),
               );
             } else {
               debugPrint('Pressed: $label');

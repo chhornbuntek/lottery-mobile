@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
 
 class BettingScreen extends StatefulWidget {
   const BettingScreen({super.key});

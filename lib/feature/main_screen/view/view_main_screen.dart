@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
 import 'ក្បាលបញ្ជី.dart';
 import 'បញ្ជី.dart';
 import 'ភ្នាល់.dart';
 import 'កម្រៃ.dart';
 import 'ម៉ោងបិទ.dart';
+import 'របៀបបញ្ចូល.dart';
+import 'លទ្ធផល.dart';
+import 'ស្មើរសុំលុប.dart';
+import 'សរុប.dart';
+import 'drawer.dart';
 
 class MainScreen extends StatelessWidget {
   const MainScreen({super.key});
@@ -15,11 +21,11 @@ class MainScreen extends StatelessWidget {
       appBar: AppBar(
         backgroundColor: Color(0xFF2C5F5F),
         elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.menu, color: Colors.white),
-          onPressed: () {
-            // Handle menu button press
-          },
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: const Icon(Icons.menu, color: Colors.white),
+            onPressed: () => Scaffold.of(context).openDrawer(),
+          ),
         ),
         title: const Text(
           '012333444',
@@ -31,6 +37,7 @@ class MainScreen extends StatelessWidget {
         ),
         centerTitle: false,
       ),
+      drawer: const CustomDrawer(),
       body: SingleChildScrollView(
         child: Padding(
           padding: const EdgeInsets.all(20.0),
@@ -149,34 +156,23 @@ class MainScreen extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
           onTap: () {
             if (label == 'ក្បាលបញ្ជី') {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const LedgerScreen()),
-              );
+              Get.to(() => const LedgerScreen());
             } else if (label == 'បញ្ជី') {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const ListScreen()),
-              );
+              Get.to(() => const ListScreen());
             } else if (label == 'ភ្នាល់') {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const BettingScreen()),
-              );
+              Get.to(() => const BettingScreen());
             } else if (label == 'កម្រៃ') {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const CommissionScreen(),
-                ),
-              );
+              Get.to(() => const CommissionScreen());
             } else if (label == 'ម៉ោងបិទ') {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const ClosingTimeScreen(),
-                ),
-              );
+              Get.to(() => const ClosingTimeScreen());
+            } else if (label == 'របៀបបញ្ចូល') {
+              Get.to(() => const InputMethodScreen());
+            } else if (label == 'លទ្ធផល') {
+              Get.to(() => const ResultScreen());
+            } else if (label == 'ស្មើរសុំលុប') {
+              Get.to(() => const DeleteRequestScreen());
+            } else if (label == 'សរុប') {
+              Get.to(() => const TotalListScreen());
             } else {
               debugPrint('Pressed: $label');
             }

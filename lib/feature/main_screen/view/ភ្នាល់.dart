@@ -198,19 +198,19 @@ class _BettingScreenState extends State<BettingScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildTimeButton(),
-          const SizedBox(height: 10),
+          const SizedBox(height: 7),
           _buildInputField(
             'ឈ្មោះ',
             'ឈ្មោះអតិថិជន',
             controller: _nameController,
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           _buildInputField('លេខចាក់:', '', controller: _betNumberController),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           _buildInputField('ចំនួន:', '', controller: _amountController),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           _buildDropdownField(),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           _buildCheckboxGrid(),
         ],
       ),
@@ -414,32 +414,53 @@ class _BettingScreenState extends State<BettingScreen> {
             _buildKeypadButton(
               Icons.close,
               '',
-              Colors.white,
-              onPressed: _onClearPressed,
+              Colors.red,
+              onPressed: () => _onKeypadPressed('x'),
             ),
           ]),
-          const SizedBox(height: 8),
+          const SizedBox(height: 5),
           _buildKeypadRow([
-            _buildKeypadButton(Icons.list, 'បង្ហាញ', Colors.red),
+            _buildKeypadButton(
+              Icons.list,
+              'បង្ហាញ',
+              Colors.red,
+              onPressed: () {
+                // Handle show/display functionality
+                debugPrint('Show pressed');
+              },
+            ),
             _buildNumberButton('4', onPressed: () => _onKeypadPressed('4')),
             _buildNumberButton('5', onPressed: () => _onKeypadPressed('5')),
             _buildNumberButton('6', onPressed: () => _onKeypadPressed('6')),
             _buildKeypadButton(
               Icons.arrow_forward,
               '',
-              Colors.white,
-              onPressed: _switchFocus,
+              Colors.red,
+              onPressed: () => _onKeypadPressed('>'),
             ),
           ]),
-          const SizedBox(height: 8),
+          const SizedBox(height: 5),
           _buildKeypadRow([
-            _buildKeypadButton(Icons.delete, 'លុប', Colors.red),
+            _buildKeypadButton(
+              Icons.delete,
+              'លុប',
+              Colors.red,
+              onPressed: () {
+                // Handle delete functionality
+                debugPrint('Delete pressed');
+              },
+            ),
             _buildNumberButton('1', onPressed: () => _onKeypadPressed('1')),
             _buildNumberButton('2', onPressed: () => _onKeypadPressed('2')),
             _buildNumberButton('3', onPressed: () => _onKeypadPressed('3')),
-            _buildKeypadButton(Icons.remove, '', Colors.white),
+            _buildKeypadButton(
+              Icons.remove,
+              '',
+              Colors.red,
+              onPressed: () => _onKeypadPressed('-'),
+            ),
           ]),
-          const SizedBox(height: 8),
+          const SizedBox(height: 5),
           Row(
             children: [
               Expanded(
@@ -450,19 +471,22 @@ class _BettingScreenState extends State<BettingScreen> {
                   Colors.red,
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 5),
               Expanded(
                 child: _buildNumberButton(
                   '0',
                   onPressed: () => _onKeypadPressed('0'),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 5),
               Expanded(
                 child: _buildKeypadButton(
-                  Icons.arrow_forward,
+                  Icons.keyboard_return,
                   '',
-                  Colors.white,
+                  Colors.red,
+                  onPressed: () {
+                    _switchFocus();
+                  },
                 ),
               ),
             ],
@@ -523,11 +547,11 @@ class _BettingScreenState extends State<BettingScreen> {
     return GestureDetector(
       onTap: onPressed,
       child: Container(
-        height: 45,
+        height: 50,
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(25),
-          border: Border.all(color: Colors.orange, width: 2),
+          border: Border.all(color: Colors.orange, width: 5),
         ),
         child: Center(
           child: Text(

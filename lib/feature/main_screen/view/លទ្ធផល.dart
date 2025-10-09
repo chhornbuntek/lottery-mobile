@@ -1,8 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-class ResultScreen extends StatelessWidget {
+class ResultScreen extends StatefulWidget {
   const ResultScreen({super.key});
+
+  @override
+  State<ResultScreen> createState() => _ResultScreenState();
+}
+
+class _ResultScreenState extends State<ResultScreen> {
+  DateTime _selectedDate = DateTime.now();
 
   @override
   Widget build(BuildContext context) {
@@ -55,17 +62,21 @@ class ResultScreen extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.chevron_left, size: 24),
             onPressed: () {
-              // Handle previous date
+              setState(() {
+                _selectedDate = _selectedDate.subtract(const Duration(days: 1));
+              });
             },
           ),
-          const Text(
-            '2025-10-07',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          Text(
+            _formatDate(_selectedDate),
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
           ),
           IconButton(
             icon: const Icon(Icons.chevron_right, size: 24),
             onPressed: () {
-              // Handle next date
+              setState(() {
+                _selectedDate = _selectedDate.add(const Duration(days: 1));
+              });
             },
           ),
         ],
@@ -103,5 +114,9 @@ class ResultScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
   }
 }

@@ -1,8 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-class CommissionScreen extends StatelessWidget {
+class CommissionScreen extends StatefulWidget {
   const CommissionScreen({super.key});
+
+  @override
+  State<CommissionScreen> createState() => _CommissionScreenState();
+}
+
+class _CommissionScreenState extends State<CommissionScreen> {
+  DateTime _selectedDate = DateTime.now();
 
   @override
   Widget build(BuildContext context) {
@@ -157,12 +164,14 @@ class CommissionScreen extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.chevron_left, color: Colors.white, size: 24),
             onPressed: () {
-              // Handle previous date
+              setState(() {
+                _selectedDate = _selectedDate.subtract(const Duration(days: 1));
+              });
             },
           ),
-          const Text(
-            '2025-10-07',
-            style: TextStyle(
+          Text(
+            _formatDate(_selectedDate),
+            style: const TextStyle(
               color: Colors.white,
               fontSize: 16,
               fontWeight: FontWeight.w600,
@@ -175,12 +184,18 @@ class CommissionScreen extends StatelessWidget {
               size: 24,
             ),
             onPressed: () {
-              // Handle next date
+              setState(() {
+                _selectedDate = _selectedDate.add(const Duration(days: 1));
+              });
             },
           ),
         ],
       ),
     );
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
   }
 
   Widget _buildBottomSection() {

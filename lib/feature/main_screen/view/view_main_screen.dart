@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import '../service/data_service.dart';
 import 'ក្បាលបញ្ជី.dart';
 import 'បញ្ជី.dart';
 import 'ភ្នាល់.dart';
@@ -27,14 +28,17 @@ class MainScreen extends StatelessWidget {
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
         ),
-        title: const Text(
-          '012333444',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
+        title: Obx(() {
+          final dataService = Get.find<DataService>();
+          return Text(
+            dataService.userPhone.isNotEmpty ? dataService.userPhone : 'User',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          );
+        }),
         centerTitle: false,
       ),
       drawer: const CustomDrawer(),

@@ -1,8 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-class LedgerScreen extends StatelessWidget {
+class LedgerScreen extends StatefulWidget {
   const LedgerScreen({super.key});
+
+  @override
+  State<LedgerScreen> createState() => _LedgerScreenState();
+}
+
+class _LedgerScreenState extends State<LedgerScreen> {
+  DateTime _selectedDate = DateTime.now();
 
   @override
   Widget build(BuildContext context) {
@@ -70,17 +77,21 @@ class LedgerScreen extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.chevron_left, size: 24),
             onPressed: () {
-              // Handle previous date
+              setState(() {
+                _selectedDate = _selectedDate.subtract(const Duration(days: 1));
+              });
             },
           ),
-          const Text(
-            '2023-07-02',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          Text(
+            _formatDate(_selectedDate),
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
           ),
           IconButton(
             icon: const Icon(Icons.chevron_right, size: 24),
             onPressed: () {
-              // Handle next date
+              setState(() {
+                _selectedDate = _selectedDate.add(const Duration(days: 1));
+              });
             },
           ),
         ],
@@ -181,9 +192,9 @@ class LedgerScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          const Text(
-            '2023-07-02',
-            style: TextStyle(
+          Text(
+            _formatDate(_selectedDate),
+            style: const TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w500,
               color: Colors.blue,
@@ -192,5 +203,9 @@ class LedgerScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
   }
 }

@@ -37,6 +37,12 @@ dependencies:
   
   # GetX for state management and navigation
   get: ^4.7.2
+  
+  # Supabase for backend services
+  supabase_flutter: ^2.9.1
+  
+  # Shared preferences (required by Supabase)
+  shared_preferences: ^2.5.3
 
 dev_dependencies:
   flutter_test:

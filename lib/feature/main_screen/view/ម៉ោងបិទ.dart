@@ -1,8 +1,45 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import '../service/ម៉ោងបិទ_service.dart';
 
-class ClosingTimeScreen extends StatelessWidget {
+class ClosingTimeScreen extends StatefulWidget {
   const ClosingTimeScreen({super.key});
+
+  @override
+  State<ClosingTimeScreen> createState() => _ClosingTimeScreenState();
+}
+
+class _ClosingTimeScreenState extends State<ClosingTimeScreen> {
+  List<ClosingTime> _closingTimes = [];
+  bool _isLoading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadClosingTimes();
+  }
+
+  Future<void> _loadClosingTimes() async {
+    try {
+      setState(() {
+        _isLoading = true;
+        _error = null;
+      });
+
+      final closingTimes = await ClosingTimeService.getAllClosingTimes();
+
+      setState(() {
+        _closingTimes = closingTimes;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -27,150 +64,86 @@ class ClosingTimeScreen extends StatelessWidget {
         ),
         centerTitle: true,
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_error != null) {
+      return Center(
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _buildScheduleSection('ខ្មែរVIP 10:35AM', [
-              _buildScheduleRow('A', '10:33', '10:33', '10:33'),
-              _buildScheduleRow('B', '10:33', '10:33', '10:33'),
-              _buildScheduleRow('C', '10:33', '10:33', '10:33'),
-              _buildScheduleRow('D', '10:33', '10:33', '10:33'),
-            ]),
-            const SizedBox(height: 20),
-            _buildScheduleSection('ខ្មែរVIP 1:00PM', [
-              _buildScheduleRow('A', '12:58', '12:58', '12:58'),
-              _buildScheduleRow('B', '12:58', '12:58', '12:58'),
-              _buildScheduleRow('C', '12:58', '12:58', '12:58'),
-              _buildScheduleRow('D', '12:58', '12:58', '12:58'),
-            ]),
-            const SizedBox(height: 20),
-            _buildScheduleSection('យួន 1:30PM', [
-              _buildScheduleRow('A', '13:14', '13:14', '13:15'),
-              _buildScheduleRow('B', '13:25', '13:25', '13:25'),
-              _buildScheduleRow('C', '13:25', '13:25', '13:25'),
-              _buildScheduleRow('D', '13:25', '13:25', '13:25'),
-              _buildScheduleRow('Lo', '13:05', '13:08', '13:05'),
-              _buildScheduleRow('F', '13:14', '13:14', '13:15'),
-            ]),
-            const SizedBox(height: 20),
-            _buildScheduleSection('ខ្មែរVIP 3:45PM', [
-              _buildScheduleRow('A', '15:43', '15:43', '15:43'),
-              _buildScheduleRow('B', '15:43', '15:43', '15:43'),
-              _buildScheduleRow('C', '15:43', '15:43', '15:43'),
-              _buildScheduleRow('D', '15:43', '15:43', '15:43'),
-            ]),
-            const SizedBox(height: 20),
-            _buildScheduleSection('យួន 4:30PM', [
-              _buildScheduleRow('A', '16:12', '16:12', '16:12'),
-              _buildScheduleRow('B', '16:25', '16:25', '16:25'),
-              _buildScheduleRow('C', '16:25', '16:25', '16:25'),
-              _buildScheduleRow('D', '16:25', '16:25', '16:25'),
-              _buildScheduleRow('F', '16:12', '16:12', '16:12'),
-              _buildScheduleRow('I', '16:10', '16:10', '16:10'),
-              _buildScheduleRow('N', '16:20', '16:20', '16:20'),
-              _buildScheduleRow('Lo', '16:05', '16:05', '16:05'),
-            ]),
-            const SizedBox(height: 20),
-            _buildScheduleSection('ខ្មែរVIP 6:00PM', [
-              _buildScheduleRow('A', '17:58', '17:58', '17:58'),
-              _buildScheduleRow('B', '17:58', '17:58', '17:58'),
-              _buildScheduleRow('C', '17:58', '17:58', '17:58'),
-              _buildScheduleRow('D', '17:58', '17:58', '17:58'),
-            ]),
-            const SizedBox(height: 20),
-            _buildScheduleSection('យួន 6:30PM', [
-              _buildScheduleRow('A', '18:14', '18:14', '18:14'),
-              _buildScheduleRow('B', '18:23', '18:23', '18:23'),
-              _buildScheduleRow('C', '18:23', '18:23', '18:23'),
-              _buildScheduleRow('D', '18:23', '18:23', '18:23'),
-              _buildScheduleRow('Lo', '18:05', '18:05', '18:05'),
-            ]),
-            const SizedBox(height: 20),
-            _buildScheduleSection('ខ្មែរVIP 7:45PM', [
-              _buildScheduleRow('A', '19:43', '19:43', '19:43'),
-              _buildScheduleRow('B', '19:43', '19:43', '19:43'),
-              _buildScheduleRow('C', '19:43', '19:43', '19:43'),
-              _buildScheduleRow('D', '19:43', '19:43', '19:43'),
-            ]),
-            const SizedBox(height: 20),
-            _buildScheduleSection('ថៃ', [
-              _buildScheduleRow('ថៃ', '15:20', '15:20', '15:20'),
-            ]),
-            const SizedBox(height: 20),
-            _buildScheduleSection('យួន 7:30PM', [
-              _buildScheduleRow('A', '19:30', '19:30', '19:30'),
-              _buildScheduleRow('B', '19:35', '19:35', '19:35'),
-            ]),
-            const SizedBox(height: 20),
-            _buildScheduleSection('អន្តរជាតិ 8:00am', [
-              _buildScheduleRow('A', '07:58', '07:58', '07:58'),
-              _buildScheduleRow('B', '07:58', '07:58', '07:58'),
-              _buildScheduleRow('C', '07:58', '07:58', '07:58'),
-              _buildScheduleRow('D', '07:58', '07:58', '07:58'),
-            ]),
-            const SizedBox(height: 20),
-            _buildScheduleSection('អន្តរជាតិ 10:00', [
-              _buildScheduleRow('A', '09:58', '09:58', '09:58'),
-              _buildScheduleRow('B', '09:58', '09:58', '09:58'),
-              _buildScheduleRow('C', '09:58', '09:58', '09:58'),
-              _buildScheduleRow('D', '09:58', '09:58', '09:58'),
-            ]),
-            const SizedBox(height: 20),
-            _buildScheduleSection('អន្តរជាតិ 12:00', [
-              _buildScheduleRow('A', '11:59', '11:59', '11:59'),
-              _buildScheduleRow('B', '11:58', '11:58', '11:58'),
-              _buildScheduleRow('C', '11:58', '11:58', '11:58'),
-              _buildScheduleRow('D', '11:58', '11:58', '11:58'),
-            ]),
-            const SizedBox(height: 20),
-            _buildScheduleSection('អន្តរជាតិ 2:00pm', [
-              _buildScheduleRow('A', '13:58', '13:58', '13:58'),
-              _buildScheduleRow('B', '13:58', '13:58', '13:58'),
-              _buildScheduleRow('C', '13:58', '13:58', '13:58'),
-              _buildScheduleRow('D', '13:58', '13:58', '13:58'),
-            ]),
-            const SizedBox(height: 20),
-            _buildScheduleSection('អន្តរជាតិ 4:00pm', [
-              _buildScheduleRow('A', '15:58', '15:58', '15:58'),
-              _buildScheduleRow('B', '15:58', '15:58', '15:58'),
-              _buildScheduleRow('C', '15:58', '15:58', '15:58'),
-              _buildScheduleRow('D', '15:58', '15:58', '15:58'),
-            ]),
-            const SizedBox(height: 20),
-            _buildScheduleSection('អន្តរជាតិ 6:00pm', [
-              _buildScheduleRow('A', '17:58', '17:58', '17:58'),
-              _buildScheduleRow('B', '17:58', '17:58', '17:58'),
-              _buildScheduleRow('C', '17:58', '17:58', '17:58'),
-              _buildScheduleRow('D', '17:58', '17:58', '17:58'),
-            ]),
-            const SizedBox(height: 20),
-            _buildScheduleSection('ខ្មែរVIP 8:45AM', [
-              _buildScheduleRow('A', '08:44', '08:44', '08:44'),
-              _buildScheduleRow('B', '08:44', '08:44', '08:44'),
-              _buildScheduleRow('C', '08:44', '08:44', '08:44'),
-              _buildScheduleRow('D', '08:44', '08:44', '08:44'),
-            ]),
-            const SizedBox(height: 20),
-            _buildScheduleSection('យួន 10:30AM', [
-              _buildScheduleRow('A', '10:25', '10:25', '10:25'),
-              _buildScheduleRow('B', '10:39', '10:39', '10:39'),
-              _buildScheduleRow('C', '10:39', '10:39', '10:39'),
-              _buildScheduleRow('D', '10:39', '10:39', '10:39'),
-              _buildScheduleRow('Lo', '10:25', '10:25', '10:25'),
-              _buildScheduleRow('F', '10:25', '10:25', '10:25'),
-            ]),
-            const SizedBox(height: 20),
-            _buildScheduleSection('អន្តរជាតិ 2:00pm', [
-              _buildScheduleRow('A', '13:58', '13:58', '13:58'),
-              _buildScheduleRow('B', '13:58', '13:58', '13:58'),
-              _buildScheduleRow('C', '13:58', '13:58', '13:58'),
-              _buildScheduleRow('D', '13:58', '13:58', '13:58'),
-            ]),
+            Icon(Icons.error_outline, size: 64, color: Colors.red.shade300),
+            const SizedBox(height: 16),
+            Text(
+              'កំហុសក្នុងការទាញយកទិន្នន័យ',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.red.shade700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _error!,
+              style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _loadClosingTimes,
+              child: const Text('ព្យាយាមម្តងទៀត'),
+            ),
           ],
         ),
+      );
+    }
+
+    if (_closingTimes.isEmpty) {
+      return const Center(
+        child: Text(
+          'មិនមានទិន្នន័យម៉ោងបិទ',
+          style: TextStyle(fontSize: 18, color: Colors.grey),
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: _closingTimes.map((closingTime) {
+          return Column(
+            children: [
+              _buildScheduleSection(
+                closingTime.timeName,
+                _buildScheduleRows(closingTime),
+              ),
+              const SizedBox(height: 20),
+            ],
+          );
+        }).toList(),
       ),
     );
+  }
+
+  List<Widget> _buildScheduleRows(ClosingTime closingTime) {
+    if (closingTime.posts.isEmpty) {
+      return [];
+    }
+
+    return closingTime.posts.map((post) {
+      return _buildScheduleRow(
+        post.postId,
+        closingTime.getTimeForDay('monday'),
+        closingTime.getTimeForDay('tuesday'),
+        closingTime.getTimeForDay('wednesday'),
+      );
+    }).toList();
   }
 
   Widget _buildScheduleSection(String title, List<Widget> rows) {

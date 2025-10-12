@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:lottery/feature/login-register/service/auth_service.dart';
-import 'login_screen.dart';
+import 'package:lottery/feature/main_screen/view/view_main_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -39,7 +39,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
       fullName: _fullNameController.text.trim(),
     );
 
-    if (success) {}
+    if (success) {
+      Get.offAll(() => const MainScreen());
+    }
   }
 
   @override

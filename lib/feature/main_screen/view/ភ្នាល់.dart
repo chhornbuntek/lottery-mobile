@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import '../service/ភ្នាល់_service.dart';
+import 'របៀបបញ្ចូល.dart';
+import 'receipt_preview.dart';
+
+// BetData class is now imported from service file
 
 class BettingScreen extends StatefulWidget {
   const BettingScreen({super.key});
@@ -13,6 +18,11 @@ class _BettingScreenState extends State<BettingScreen> {
   final TextEditingController _betNumberController = TextEditingController();
   final TextEditingController _amountController = TextEditingController();
   final String _selectedBill = 'ល.រ';
+  LotteryTime? _selectedLotteryTime;
+  List<String> _expandedNumbers = [];
+  List<BetData> _betList = [];
+  int _totalAmount = 0;
+  List<int> _pendingBetIds = []; // Track pending bet IDs
   final Map<String, bool> _checkboxes = {
     '4P': false,
     'F': false,
@@ -23,6 +33,7 @@ class _BettingScreenState extends State<BettingScreen> {
     'Lo': false,
     'N': false,
     'D': false,
+    'A': false,
   };
   int _focusedFieldIndex =
       0; // Track which field is focused: 0=name, 1=bet, 2=amount
@@ -35,12 +46,252 @@ class _BettingScreenState extends State<BettingScreen> {
           break;
         case 1:
           _betNumberController.text += value;
+          // Always try to expand numbers, whether special pattern or regular numbers
+          _expandedNumbers = _expandBetNumbers(_betNumberController.text);
           break;
         case 2:
           _amountController.text += value;
           break;
       }
     });
+  }
+
+  List<String> _expandBetNumbers(String input) {
+    List<String> expandedNumbers = [];
+
+    // Handle x (reverse) pattern: 10x = 10, 01 | 125x = all permutations | 122x = unique permutations
+    if (input.contains('x')) {
+      String baseNumber = input.replaceAll('x', '');
+      if (baseNumber.length == 2) {
+        // 2-digit: 10x = 10, 01
+        expandedNumbers.add(baseNumber);
+        expandedNumbers.add(baseNumber.split('').reversed.join(''));
+      } else if (baseNumber.length == 3) {
+        // 3-digit: Generate all permutations
+        List<String> digits = baseNumber.split('');
+        Set<String> permutations = <String>{};
+
+        // Generate all possible permutations
+        for (int i = 0; i < 3; i++) {
+          for (int j = 0; j < 3; j++) {
+            for (int k = 0; k < 3; k++) {
+              if (i != j && j != k && i != k) {
+                permutations.add('${digits[i]}${digits[j]}${digits[k]}');
+              }
+            }
+          }
+        }
+
+        // Add all unique permutations
+        expandedNumbers.addAll(permutations.toList());
+      }
+      return expandedNumbers;
+    }
+
+    // Handle > (drag) pattern for 2-digit: 10> = 10, 11, 12, ..., 19 | 25> = 25, 35, 45, ..., 95
+    // Handle > (drag) pattern for 3-digit: 157> = 157, 158, ..., 999
+    if (input.contains('>')) {
+      List<String> parts = input.split('>');
+      if (parts.length == 2 && parts[1].isEmpty) {
+        // Single number with > (drag pattern)
+        String start = parts[0];
+
+        if (start.length == 2) {
+          int startNum = int.tryParse(start) ?? 0;
+          int firstDigit = startNum ~/ 10;
+          int lastDigit = startNum % 10;
+
+          // Check if it's a tail drag pattern (like 25> = 25, 35, 45, ..., 95)
+          // Tail drag: when the first digit is 2 or higher and last digit is 5 or higher
+          // Regular drag: when first digit is 1 or when last digit is 0-4
+          if (firstDigit >= 2 && lastDigit >= 5) {
+            // Tail drag pattern: increment first digit by 10, keep last digit
+            for (int i = firstDigit; i <= 9; i++) {
+              expandedNumbers.add('${i}${lastDigit}');
+            }
+          } else {
+            // Regular drag pattern: increment last digit from start to 9
+            for (int i = lastDigit; i <= 9; i++) {
+              expandedNumbers.add('${firstDigit}${i}');
+            }
+          }
+        } else if (start.length == 3) {
+          // 3-digit pattern: 157> = 157, 158, ..., 999
+          int startNum = int.tryParse(start) ?? 0;
+          for (int i = startNum; i <= 999; i++) {
+            expandedNumbers.add(i.toString().padLeft(3, '0'));
+          }
+        }
+      } else if (parts.length == 2 && parts[1].isNotEmpty) {
+        // Range pattern: 157>162 = 157, 158, 159, 160, 161, 162
+        String start = parts[0];
+        String end = parts[1];
+
+        if (start.length == 2 && end.length == 2) {
+          int startNum = int.tryParse(start) ?? 0;
+          int endNum = int.tryParse(end) ?? 0;
+          for (int i = startNum; i <= endNum; i++) {
+            expandedNumbers.add(i.toString().padLeft(2, '0'));
+          }
+        } else if (start.length == 3 && end.length == 3) {
+          int startNum = int.tryParse(start) ?? 0;
+          int endNum = int.tryParse(end) ?? 0;
+          for (int i = startNum; i <= endNum; i++) {
+            expandedNumbers.add(i.toString().padLeft(3, '0'));
+          }
+        }
+      }
+      return expandedNumbers;
+    }
+
+    // Handle -x (reverse drag) pattern: 10-19x = 10, 01, 11, 12, 21, ..., 19, 91
+    if (input.contains('-') && input.contains('x')) {
+      List<String> parts = input.split('-');
+      if (parts.length == 2) {
+        String start = parts[0];
+        String endWithX = parts[1];
+        String end = endWithX.replaceAll('x', '');
+
+        if (start.length == 2 && end.length == 2) {
+          // 2-digit reverse drag pattern: 10-19x = 10, 01, 11, 12, 21, ..., 19, 91
+          int startNum = int.tryParse(start) ?? 0;
+          int endNum = int.tryParse(end) ?? 0;
+
+          for (int i = startNum; i <= endNum; i++) {
+            String number = i.toString().padLeft(2, '0');
+            expandedNumbers.add(number);
+            // Add reverse if it's different
+            String reversed = number.split('').reversed.join('');
+            if (reversed != number) {
+              expandedNumbers.add(reversed);
+            }
+          }
+        }
+      }
+      return expandedNumbers;
+    }
+
+    // Handle - (sequential) pattern for 2-digit: 01-46 = 01, 02, 03, ..., 46
+    // Handle - (drag straight) pattern for 3-digit with different rules
+    if (input.contains('-')) {
+      List<String> parts = input.split('-');
+      if (parts.length == 2) {
+        String start = parts[0];
+        String end = parts[1];
+
+        if (start.length == 2 && end.length == 2) {
+          // 2-digit pattern: Sequential range (01-46 = 01, 02, 03, ..., 46)
+          int startNum = int.tryParse(start) ?? 0;
+          int endNum = int.tryParse(end) ?? 0;
+
+          for (int i = startNum; i <= endNum; i++) {
+            expandedNumbers.add(i.toString().padLeft(2, '0'));
+          }
+        } else if (start.length == 3 && end.length == 3) {
+          // 3-digit patterns
+          int startNum = int.tryParse(start) ?? 0;
+          int endNum = int.tryParse(end) ?? 0;
+
+          // Pattern 1: 000-333 = 000, 111, 222, 333 (same digits)
+          if (start[0] == start[1] &&
+              start[1] == start[2] &&
+              end[0] == end[1] &&
+              end[1] == end[2]) {
+            for (int i = startNum; i <= endNum; i += 111) {
+              expandedNumbers.add(i.toString().padLeft(3, '0'));
+            }
+          }
+          // Pattern 2: 123-153 = 123, 133, 143, 153 (middle digit changes)
+          else if (start[0] == end[0] &&
+              start[2] == end[2] &&
+              start[1] != end[1]) {
+            int firstDigit = int.parse(start[0]);
+            int lastDigit = int.parse(start[2]);
+            int startMiddle = int.parse(start[1]);
+            int endMiddle = int.parse(end[1]);
+
+            for (int i = startMiddle; i <= endMiddle; i++) {
+              expandedNumbers.add('$firstDigit$i$lastDigit');
+            }
+          }
+          // Pattern 3: 120-620 = 120, 220, 320, 420, 520, 620 (first digit changes)
+          else if (start[1] == end[1] &&
+              start[2] == end[2] &&
+              start[0] != end[0]) {
+            int middleDigit = int.parse(start[1]);
+            int lastDigit = int.parse(start[2]);
+            int startFirst = int.parse(start[0]);
+            int endFirst = int.parse(end[0]);
+
+            for (int i = startFirst; i <= endFirst; i++) {
+              expandedNumbers.add('$i$middleDigit$lastDigit');
+            }
+          }
+          // Pattern 4: 122-144 = 122, 133, 144 (diagonal pattern)
+          else if (start[0] == end[0] &&
+              start[1] == end[1] &&
+              start[2] != end[2]) {
+            int firstDigit = int.parse(start[0]);
+            int middleDigit = int.parse(start[1]);
+            int startLast = int.parse(start[2]);
+            int endLast = int.parse(end[2]);
+
+            for (int i = startLast; i <= endLast; i++) {
+              expandedNumbers.add('$firstDigit$middleDigit$i');
+            }
+          }
+          // Pattern 5: 221-661 = 221, 331, 441, 551, 661 (head same pattern)
+          else if (start[0] == end[0] &&
+              start[1] != end[1] &&
+              start[2] != end[2]) {
+            int firstDigit = int.parse(start[0]);
+            int startMiddle = int.parse(start[1]);
+            int endMiddle = int.parse(end[1]);
+            int startLast = int.parse(start[2]);
+            int endLast = int.parse(end[2]);
+
+            // Calculate the increment for middle and last digits
+            int middleIncrement = endMiddle - startMiddle;
+            int lastIncrement = endLast - startLast;
+
+            // Generate numbers with same first digit, incrementing middle and last
+            int steps = middleIncrement.abs();
+            for (int i = 0; i <= steps; i++) {
+              int middle = startMiddle + (middleIncrement * i ~/ steps);
+              int last = startLast + (lastIncrement * i ~/ steps);
+              expandedNumbers.add('$firstDigit$middle$last');
+            }
+          }
+          // Pattern 6: 121-525 = 121, 222, 323, 424, 525 (diagonal pattern)
+          else if (start[0] != end[0] &&
+              start[1] != end[1] &&
+              start[2] != end[2]) {
+            int startFirst = int.parse(start[0]);
+            int endFirst = int.parse(end[0]);
+            int startMiddle = int.parse(start[1]);
+            int endMiddle = int.parse(end[1]);
+            int startLast = int.parse(start[2]);
+            int endLast = int.parse(end[2]);
+
+            int steps = (endFirst - startFirst).abs();
+            for (int i = 0; i <= steps; i++) {
+              int first = startFirst + (endFirst - startFirst) * i ~/ steps;
+              int middle = startMiddle + (endMiddle - startMiddle) * i ~/ steps;
+              int last = startLast + (endLast - startLast) * i ~/ steps;
+              expandedNumbers.add('$first$middle$last');
+            }
+          }
+        }
+      }
+      return expandedNumbers;
+    }
+
+    // If no special pattern, handle regular numbers
+    if (input.isNotEmpty) {
+      // If it's a single number or simple sequence, add it as is
+      expandedNumbers.add(input);
+    }
+    return expandedNumbers;
   }
 
   void _onClearPressed() {
@@ -51,6 +302,7 @@ class _BettingScreenState extends State<BettingScreen> {
           break;
         case 1:
           _betNumberController.clear();
+          _expandedNumbers.clear();
           break;
         case 2:
           _amountController.clear();
@@ -76,6 +328,8 @@ class _BettingScreenState extends State<BettingScreen> {
               0,
               _betNumberController.text.length - 1,
             );
+            // Always try to expand numbers, whether special pattern or regular numbers
+            _expandedNumbers = _expandBetNumbers(_betNumberController.text);
           }
           break;
         case 2:
@@ -96,10 +350,390 @@ class _BettingScreenState extends State<BettingScreen> {
     });
   }
 
+  void _handleCheckboxChange(String checkboxKey, bool value) {
+    setState(() {
+      if (checkboxKey == '4P' && value) {
+        // 4P selected: auto select A, B, C, D
+        _checkboxes['4P'] = true;
+        _checkboxes['A'] = true;
+        _checkboxes['B'] = true;
+        _checkboxes['C'] = true;
+        _checkboxes['D'] = true;
+      } else if (checkboxKey == '7P' && value) {
+        // 7P selected: auto select F, I, N, A, B, C, D
+        _checkboxes['7P'] = true;
+        _checkboxes['F'] = true;
+        _checkboxes['I'] = true;
+        _checkboxes['N'] = true;
+        _checkboxes['A'] = true;
+        _checkboxes['B'] = true;
+        _checkboxes['C'] = true;
+        _checkboxes['D'] = true;
+      } else if (checkboxKey == '4P' && !value) {
+        // 4P deselected: uncheck A, B, C, D only if they were auto-selected
+        _checkboxes['4P'] = false;
+        _checkboxes['A'] = false;
+        _checkboxes['B'] = false;
+        _checkboxes['C'] = false;
+        _checkboxes['D'] = false;
+      } else if (checkboxKey == '7P' && !value) {
+        // 7P deselected: uncheck F, I, N, A, B, C, D only if they were auto-selected
+        _checkboxes['7P'] = false;
+        _checkboxes['F'] = false;
+        _checkboxes['I'] = false;
+        _checkboxes['N'] = false;
+        _checkboxes['A'] = false;
+        _checkboxes['B'] = false;
+        _checkboxes['C'] = false;
+        _checkboxes['D'] = false;
+      } else {
+        // Regular checkbox change
+        _checkboxes[checkboxKey] = value;
+      }
+    });
+  }
+
+  int _calculateTotalAmount() {
+    int total = 0;
+    for (var bet in _betList) {
+      total += bet.totalAmount;
+    }
+    return total;
+  }
+
+  Future<void> _addNewBet() async {
+    // Validate inputs
+    if (_selectedLotteryTime == null) {
+      Get.snackbar(
+        'កំហុស',
+        'សូមជ្រើសរើសពេលវេលា',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+      return;
+    }
+
+    if (_nameController.text.trim().isEmpty) {
+      Get.snackbar(
+        'កំហុស',
+        'សូមបញ្ចូលឈ្មោះអតិថិជន',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+      return;
+    }
+
+    if (_expandedNumbers.isEmpty) {
+      Get.snackbar(
+        'កំហុស',
+        'សូមបញ្ចូលលេខចាក់',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+      return;
+    }
+
+    int amountPerNumber = int.tryParse(_amountController.text) ?? 0;
+    if (amountPerNumber <= 0) {
+      Get.snackbar(
+        'កំហុស',
+        'សូមបញ្ចូលចំនួនប្រាក់',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+      return;
+    }
+
+    // Get selected conditions and filter out shortcuts
+    List<String> selectedConditions = [];
+    _checkboxes.forEach((key, value) {
+      if (value) selectedConditions.add(key);
+    });
+
+    // Filter out shortcut conditions (4P, 7P) - only store actual conditions
+    List<String> filteredConditions = selectedConditions
+        .where((condition) => !['4P', '7P'].contains(condition))
+        .toList();
+
+    if (filteredConditions.isEmpty) {
+      Get.snackbar(
+        'កំហុស',
+        'សូមជ្រើសរើសលក្ខខណ្ឌ',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+      return;
+    }
+
+    // Calculate total amount with new multiplier logic
+    int multiplier = 1;
+
+    // Special multipliers only for 4P and 7P
+    if (selectedConditions.contains('4P')) {
+      multiplier = 4;
+    } else if (selectedConditions.contains('7P')) {
+      multiplier = 7;
+    } else {
+      // Simple logic: number of selected conditions = multiplier
+      multiplier = selectedConditions.length;
+    }
+
+    int totalAmount = _expandedNumbers.length * amountPerNumber * multiplier;
+
+    // Create new bet
+    BetData newBet = BetData(
+      customerName: _nameController.text.trim(),
+      lotteryTimeId: _selectedLotteryTime!.id,
+      lotteryTime: _selectedLotteryTime!.timeName,
+      betPattern: _betNumberController.text.trim(),
+      betNumbers: List.from(_expandedNumbers),
+      amountPerNumber: amountPerNumber,
+      totalAmount: totalAmount,
+      selectedConditions:
+          filteredConditions, // Use filtered conditions (without 4P/7P)
+      multiplier: multiplier,
+      billType: _selectedBill,
+      createdAt: DateTime.now(),
+    );
+
+    // Add to bet list
+    setState(() {
+      _betList.add(newBet);
+      _totalAmount = _calculateTotalAmount();
+    });
+
+    // Store in pending bets table and track ID
+    try {
+      final pendingBet = await BetsService.insertPendingBet(
+        customerName: _nameController.text.trim(),
+        lotteryTimeId: _selectedLotteryTime!.id,
+        lotteryTime: _selectedLotteryTime!.timeName,
+        betPattern: _betNumberController.text.trim(),
+        betNumbers: List.from(_expandedNumbers),
+        amountPerNumber: amountPerNumber,
+        totalAmount: totalAmount,
+        multiplier: multiplier,
+        billType: _selectedBill,
+        selectedConditions: filteredConditions,
+      );
+
+      // Track the pending bet ID for later payment
+      if (pendingBet.id != null) {
+        _pendingBetIds.add(pendingBet.id!);
+      }
+    } catch (e) {
+      print('Error storing pending bet: $e');
+    }
+
+    // Clear form
+    _clearForm();
+
+    // Get.snackbar(
+    //   'ជោគជ័យ',
+    //   'បានបន្ថែមចាក់បាច់ថ្មី',
+    //   backgroundColor: Colors.green,
+    //   colorText: Colors.white,
+    // );
+  }
+
+  void _clearForm() {
+    _nameController.clear();
+    _betNumberController.clear();
+    _amountController.clear();
+    _expandedNumbers.clear();
+    _selectedLotteryTime = null;
+    _checkboxes.updateAll((key, value) => false);
+    setState(() {});
+  }
+
+  Future<void> _processPayment() async {
+    if (_betList.isEmpty) {
+      Get.snackbar(
+        'កំហុស',
+        'មិនមានចាក់បាច់សម្រាប់បង់ប្រាក់',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+      return;
+    }
+
+    // Show loading dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return const AlertDialog(
+          backgroundColor: Colors.white,
+          content: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 16),
+              Text('កំពុងបង់ប្រាក់...'),
+            ],
+          ),
+        );
+      },
+    );
+
+    try {
+      // Move pending bets to bets table
+      if (_pendingBetIds.isNotEmpty) {
+        await BetsService.movePendingBetsToBets(_pendingBetIds);
+      }
+
+      // Close loading dialog
+      Navigator.of(context).pop();
+
+      // Show success message
+      Get.snackbar(
+        'ជោគជ័យ',
+        'បានបង់ប្រាក់ជោគជ័យ! សរុប: $_totalAmount ៛',
+        backgroundColor: Colors.green,
+        colorText: Colors.white,
+        duration: const Duration(seconds: 3),
+      );
+
+      // Clear bet list and reset form
+      setState(() {
+        _betList.clear();
+        _totalAmount = 0;
+        _pendingBetIds.clear();
+      });
+      _clearForm();
+    } catch (e) {
+      // Close loading dialog
+      Navigator.of(context).pop();
+
+      // Show error message
+      Get.snackbar(
+        'កំហុស',
+        'មិនអាចបង់ប្រាក់បាន: $e',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+    }
+  }
+
+  void _showReceiptPreview() {
+    if (_betList.isEmpty) {
+      Get.snackbar(
+        'កំហុស',
+        'មិនមានចាក់បាច់សម្រាប់បង្ហាញវិក័យប័ត្រ',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+      return;
+    }
+
+    Get.to(() => ReceiptPreview(betList: _betList, totalAmount: _totalAmount));
+  }
+
+  Future<void> _showLotteryTimeDialog() async {
+    // Show loading dialog first
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return const AlertDialog(
+          backgroundColor: Colors.white,
+
+          content: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 16),
+              Text('កំពុងទាញយកពេលវេលា...'),
+            ],
+          ),
+        );
+      },
+    );
+
+    try {
+      final lotteryTimes = await LotteryTimesService.getAllLotteryTimes();
+
+      // Close loading dialog
+      Navigator.of(context).pop();
+
+      if (lotteryTimes.isEmpty) {
+        Get.snackbar(
+          'ព័ត៌មាន',
+          'មិនមានពេលវេលាចាក់បាច់',
+          backgroundColor: Colors.orange,
+          colorText: Colors.white,
+        );
+        return;
+      }
+
+      showDialog(
+        context: context,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            backgroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            title: const Text(
+              'ជ្រើសរើសពេលវេលា',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: lotteryTimes.length,
+                itemBuilder: (context, index) {
+                  final lotteryTime = lotteryTimes[index];
+                  return ListTile(
+                    title: Text(
+                      lotteryTime.timeName,
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                    subtitle: Text(
+                      lotteryTime.timeCategory,
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    ),
+                    onTap: () {
+                      setState(() {
+                        _selectedLotteryTime = lotteryTime;
+                      });
+                      Navigator.of(context).pop();
+                    },
+                    selected: _selectedLotteryTime?.id == lotteryTime.id,
+                    selectedTileColor: Colors.orange.withOpacity(0.1),
+                  );
+                },
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('បិទ'),
+              ),
+            ],
+          );
+        },
+      );
+    } catch (e) {
+      // Close loading dialog
+      Navigator.of(context).pop();
+
+      Get.snackbar(
+        'កំហុស',
+        'មិនអាចទាញយកពេលវេលាបាន: $e',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
+      resizeToAvoidBottomInset:
+          false, // Prevent keyboard from pushing content up
       body: Column(
         children: [
           const SizedBox(height: 20),
@@ -127,22 +761,23 @@ class _BettingScreenState extends State<BettingScreen> {
       ),
       child: Row(
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.yellow,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Text(
-              'បង់ប្រាក់',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+          GestureDetector(
+            onTap: _processPayment,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.yellow,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange, width: 1),
+              ),
+              child: const Text(
+                'បង់ប្រាក់',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+              ),
             ),
           ),
           const SizedBox(width: 8),
-          const Text(
-            '0',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-          ),
+
           const Spacer(),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -151,20 +786,23 @@ class _BettingScreenState extends State<BettingScreen> {
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: Colors.grey.shade300),
             ),
-            child: const Text(
-              '0',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+            child: Text(
+              '$_totalAmount ៛',
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
             ),
           ),
           const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.grey.shade300),
+          GestureDetector(
+            onTap: _showReceiptPreview,
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: const Icon(Icons.print, size: 20),
             ),
-            child: const Icon(Icons.print, size: 20),
           ),
         ],
       ),
@@ -173,17 +811,138 @@ class _BettingScreenState extends State<BettingScreen> {
 
   Widget _buildDisplayArea() {
     return Container(
-      margin: const EdgeInsets.all(16),
+      margin: const EdgeInsets.all(10),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.grey.shade300),
       ),
-      child: const Center(
-        child: Text(
-          'Display Area',
-          style: TextStyle(fontSize: 16, color: Colors.grey),
-        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'សរុប ៖',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black,
+                ),
+              ),
+              Text(
+                '$_totalAmount ៛',
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.red,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (_betList.isNotEmpty)
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  children: _betList.map((bet) {
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Divider(),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                bet.customerName,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            bet.lotteryTime,
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: Colors.grey,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          // Show selected conditions (filter out 4P and 7P)
+                          Wrap(
+                            spacing: 4,
+                            children: bet.selectedConditions
+                                .where(
+                                  (condition) =>
+                                      condition != '4P' && condition != '7P',
+                                )
+                                .map((condition) {
+                                  return Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.blue.shade100,
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: Colors.blue.shade300,
+                                        width: 1,
+                                      ),
+                                    ),
+                                    child: Text(
+                                      condition,
+                                      style: TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w500,
+                                        color: Colors.blue.shade700,
+                                      ),
+                                    ),
+                                  );
+                                })
+                                .toList(),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            bet.betPattern,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              color: Colors.orange,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${bet.amountPerNumber} ៛',
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: Colors.grey,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+            )
+          else
+            const Expanded(
+              child: Center(
+                child: Text(
+                  'វាយបញ្ចូលលេខចាក់',
+                  style: TextStyle(fontSize: 14, color: Colors.grey),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -218,18 +977,24 @@ class _BettingScreenState extends State<BettingScreen> {
   }
 
   Widget _buildTimeButton() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade600,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: const Text(
-        'ពេល',
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: 14,
-          fontWeight: FontWeight.w500,
+    return GestureDetector(
+      onTap: _showLotteryTimeDialog,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.grey.shade600,
+          borderRadius: BorderRadius.circular(8),
+          border: _selectedLotteryTime != null
+              ? Border.all(color: Colors.orange, width: 2)
+              : null,
+        ),
+        child: Text(
+          _selectedLotteryTime?.timeName ?? 'ពេល',
+          style: TextStyle(
+            color: _selectedLotteryTime != null ? Colors.orange : Colors.white,
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
         ),
       ),
     );
@@ -275,7 +1040,7 @@ class _BettingScreenState extends State<BettingScreen> {
             }
           },
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 6),
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(8),
@@ -286,7 +1051,9 @@ class _BettingScreenState extends State<BettingScreen> {
             child: controller != null
                 ? TextField(
                     controller: controller,
-                    enabled: false, // Disable keyboard
+                    enabled: controller == _nameController
+                        ? true
+                        : false, // Enable keyboard for name field only
                     decoration: InputDecoration(
                       hintText: hint,
                       border: InputBorder.none,
@@ -304,58 +1071,130 @@ class _BettingScreenState extends State<BettingScreen> {
   }
 
   Widget _buildDropdownField() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       children: [
-        const Text(
-          'បុង: ល.រ',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Text(
-                  _selectedBill,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
+              const Text(
+                'បុង: ល.រ',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
-              const Icon(Icons.arrow_drop_down, size: 20),
+              const SizedBox(height: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _selectedBill,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    const Icon(Icons.arrow_drop_down, size: 20),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
+        // Show A checkbox only for Vietnam category
+        if (_selectedLotteryTime?.timeCategory == 'vietnam') ...[
+          const SizedBox(width: 8),
+          Column(
+            children: [
+              const SizedBox(height: 20), // Align with dropdown
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: Checkbox(
+                      value: _checkboxes['A'] ?? false,
+                      onChanged: (value) {
+                        _handleCheckboxChange('A', value ?? false);
+                      },
+                      activeColor: Colors.orange,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  const Text(
+                    'A',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(width: 15),
+                ],
+              ),
+            ],
+          ),
+        ],
       ],
     );
   }
 
   Widget _buildCheckboxGrid() {
-    return Column(
-      children: [
-        _buildCheckboxRow(['4P', 'F', 'B']),
-        const SizedBox(height: 12),
-        _buildCheckboxRow(['7P', 'I', 'C']),
-        const SizedBox(height: 12),
-        _buildCheckboxRow(['Lo', 'N', 'D']),
-      ],
-    );
+    // Get the category from selected lottery time
+    String category = _selectedLotteryTime?.timeCategory ?? 'vietnam';
+
+    switch (category) {
+      case 'khmer-vip':
+      case 'international':
+        return Column(
+          children: [
+            _buildCheckboxRow(['4P', 'A', 'B']),
+            const SizedBox(height: 12),
+            _buildCheckboxRow(['C', 'D', '']),
+          ],
+        );
+      case 'thai':
+        return Column(
+          children: [
+            _buildCheckboxRow(['T', '', '']),
+          ],
+        );
+      case 'vietnam':
+      default:
+        return Column(
+          children: [
+            _buildCheckboxRow(['4P', 'F', 'B']),
+            const SizedBox(height: 12),
+            _buildCheckboxRow(['7P', 'I', 'C']),
+            const SizedBox(height: 12),
+            _buildCheckboxRow(['Lo', 'N', 'D']),
+          ],
+        );
+    }
   }
 
   Widget _buildCheckboxRow(List<String> labels) {
     return Row(
       children: labels.map((label) {
+        // Skip empty strings (used for spacing)
+        if (label.isEmpty) {
+          return const Expanded(child: SizedBox());
+        }
+
         return Expanded(
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -366,9 +1205,7 @@ class _BettingScreenState extends State<BettingScreen> {
                 child: Checkbox(
                   value: _checkboxes[label] ?? false,
                   onChanged: (value) {
-                    setState(() {
-                      _checkboxes[label] = value ?? false;
-                    });
+                    _handleCheckboxChange(label, value ?? false);
                   },
                   activeColor: Colors.orange,
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -425,19 +1262,14 @@ class _BettingScreenState extends State<BettingScreen> {
               'បង្ហាញ',
               Colors.red,
               onPressed: () {
-                // Handle show/display functionality
-                debugPrint('Show pressed');
+                // Navigate to input method screen
+                Get.to(() => const InputMethodScreen());
               },
             ),
             _buildNumberButton('4', onPressed: () => _onKeypadPressed('4')),
             _buildNumberButton('5', onPressed: () => _onKeypadPressed('5')),
             _buildNumberButton('6', onPressed: () => _onKeypadPressed('6')),
-            _buildKeypadButton(
-              Icons.arrow_forward,
-              '',
-              Colors.red,
-              onPressed: () => _onKeypadPressed('>'),
-            ),
+            _buildNumberButton('>', onPressed: () => _onKeypadPressed('>')),
           ]),
           const SizedBox(height: 5),
           _buildKeypadRow([
@@ -469,6 +1301,7 @@ class _BettingScreenState extends State<BettingScreen> {
                   Icons.gps_fixed,
                   'ចាក់ថ្មី',
                   Colors.red,
+                  onPressed: _addNewBet,
                 ),
               ),
               const SizedBox(width: 5),
@@ -547,7 +1380,7 @@ class _BettingScreenState extends State<BettingScreen> {
     return GestureDetector(
       onTap: onPressed,
       child: Container(
-        height: 50,
+        height: 47,
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(25),

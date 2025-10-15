@@ -1,6 +1,7 @@
 import 'package:get/get.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../api/auth_api.dart';
+import '../../../core/firebase_service.dart';
 
 class AuthService extends GetxController {
   // Observable variables
@@ -35,10 +36,40 @@ class AuthService extends GetxController {
 
       if (data.session?.user != null) {
         _loadUserProfile(data.session!.user.id);
+        // Initialize FCM token for authenticated user
+        _initializeFCMToken();
       } else {
         _userProfile.value = null;
+        // Remove FCM token when user logs out
+        _removeFCMToken();
       }
     });
+  }
+
+  /// Initialize FCM token for authenticated user
+  Future<void> _initializeFCMToken() async {
+    try {
+      final firebaseService = Get.find<FirebaseService>();
+      // Force refresh and save FCM token for the authenticated user
+      await firebaseService.refreshAndSaveToken();
+      print(
+        '🔐 Auth + FCM: ✅ Token initialization completed for authenticated user',
+      );
+    } catch (e) {
+      print('🔥 Auth + FCM Error: ❌ Failed to initialize FCM token: $e');
+    }
+  }
+
+  /// Remove FCM token when user logs out
+  Future<void> _removeFCMToken() async {
+    try {
+      final firebaseService = Get.find<FirebaseService>();
+      print('🔐 Auth + FCM: 🔍 Attempting to remove FCM token...');
+      await firebaseService.deleteFCMToken();
+      print('🔐 Auth + FCM: ✅ Token successfully removed on logout');
+    } catch (e) {
+      print('🔥 Auth + FCM Error: ❌ Failed to remove FCM token: $e');
+    }
   }
 
   /// Register new user
@@ -60,6 +91,12 @@ class AuthService extends GetxController {
       if (response.user != null) {
         _currentUser.value = response.user;
         await _loadUserProfile(response.user!.id);
+
+        print(
+          '🔐 Auth: ✅ User registration successful for ${response.user!.id}',
+        );
+        // Initialize FCM token for newly registered user
+        await _initializeFCMToken();
 
         Get.snackbar(
           'Success',
@@ -99,6 +136,9 @@ class AuthService extends GetxController {
         _currentUser.value = response.user;
         await _loadUserProfile(response.user!.id);
 
+        // Initialize FCM token for logged in user
+        await _initializeFCMToken();
+
         Get.snackbar(
           'Success',
           'Login successful!',
@@ -129,6 +169,10 @@ class AuthService extends GetxController {
   Future<void> logout() async {
     try {
       _isLoading.value = true;
+
+      // Remove FCM token BEFORE logout (while user is still authenticated)
+      print('🔐 Auth: 🗑️ Removing FCM token before logout');
+      await _removeFCMToken();
 
       await AuthApi.logout();
       _currentUser.value = null;

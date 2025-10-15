@@ -139,11 +139,38 @@ class _ClosingTimeScreenState extends State<ClosingTimeScreen> {
     return closingTime.posts.map((post) {
       return _buildScheduleRow(
         post.postId,
-        closingTime.getTimeForDay('monday'),
-        closingTime.getTimeForDay('tuesday'),
-        closingTime.getTimeForDay('wednesday'),
+        _convertToCambodiaTime(closingTime.getTimeForDay('monday')),
+        _convertToCambodiaTime(closingTime.getTimeForDay('tuesday')),
+        _convertToCambodiaTime(closingTime.getTimeForDay('wednesday')),
+        _convertToCambodiaTime(closingTime.getTimeForDay('thursday')),
+        _convertToCambodiaTime(closingTime.getTimeForDay('friday')),
+        _convertToCambodiaTime(closingTime.getTimeForDay('saturday')),
+        _convertToCambodiaTime(closingTime.getTimeForDay('sunday')),
       );
     }).toList();
+  }
+
+  /// Convert international time to Cambodia time with AM/PM format
+  String _convertToCambodiaTime(String? time) {
+    if (time == null || time.isEmpty) return '';
+
+    try {
+      // Parse the time (assuming format like "14:30" or "14:30:00")
+      List<String> timeParts = time.split(':');
+      if (timeParts.length < 2) return time;
+
+      int hour = int.parse(timeParts[0]);
+      int minute = int.parse(timeParts[1]);
+
+      // Convert to 12-hour format with AM/PM
+      String period = hour >= 12 ? 'PM' : 'AM';
+      int displayHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
+
+      return '${displayHour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')} $period';
+    } catch (e) {
+      // If parsing fails, return original time
+      return time;
+    }
   }
 
   Widget _buildScheduleSection(String title, List<Widget> rows) {
@@ -174,8 +201,14 @@ class _ClosingTimeScreenState extends State<ClosingTimeScreen> {
               ),
             ),
           ),
-          _buildTableHeader(),
-          ...rows,
+          // Horizontal scrollable table
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Container(
+              constraints: const BoxConstraints(minWidth: 600),
+              child: Column(children: [_buildTableHeader(), ...rows]),
+            ),
+          ),
         ],
       ),
     );
@@ -190,8 +223,8 @@ class _ClosingTimeScreenState extends State<ClosingTimeScreen> {
       ),
       child: Row(
         children: [
-          Expanded(
-            flex: 1,
+          Container(
+            width: 80,
             child: Text(
               'ប៉ុស្តិ',
               style: TextStyle(
@@ -201,8 +234,8 @@ class _ClosingTimeScreenState extends State<ClosingTimeScreen> {
               ),
             ),
           ),
-          Expanded(
-            flex: 1,
+          Container(
+            width: 100,
             child: Text(
               'ចន្ទ',
               style: const TextStyle(
@@ -213,8 +246,8 @@ class _ClosingTimeScreenState extends State<ClosingTimeScreen> {
               textAlign: TextAlign.center,
             ),
           ),
-          Expanded(
-            flex: 1,
+          Container(
+            width: 100,
             child: Text(
               'អង្គារ៍',
               style: const TextStyle(
@@ -225,10 +258,58 @@ class _ClosingTimeScreenState extends State<ClosingTimeScreen> {
               textAlign: TextAlign.center,
             ),
           ),
-          Expanded(
-            flex: 1,
+          Container(
+            width: 100,
             child: Text(
               'ពុធ',
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.black,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          Container(
+            width: 100,
+            child: Text(
+              'ព្រហស្បតិ៍',
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.black,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          Container(
+            width: 100,
+            child: Text(
+              'សុក្រ',
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.black,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          Container(
+            width: 100,
+            child: Text(
+              'សៅរ៍',
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.black,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          Container(
+            width: 100,
+            child: Text(
+              'អាទិត្យ',
               style: const TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
@@ -247,6 +328,10 @@ class _ClosingTimeScreenState extends State<ClosingTimeScreen> {
     String monday,
     String tuesday,
     String wednesday,
+    String thursday,
+    String friday,
+    String saturday,
+    String sunday,
   ) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -255,8 +340,8 @@ class _ClosingTimeScreenState extends State<ClosingTimeScreen> {
       ),
       child: Row(
         children: [
-          Expanded(
-            flex: 1,
+          Container(
+            width: 80,
             child: Text(
               post,
               style: const TextStyle(
@@ -266,8 +351,8 @@ class _ClosingTimeScreenState extends State<ClosingTimeScreen> {
               ),
             ),
           ),
-          Expanded(
-            flex: 1,
+          Container(
+            width: 100,
             child: Text(
               monday,
               style: const TextStyle(
@@ -278,8 +363,8 @@ class _ClosingTimeScreenState extends State<ClosingTimeScreen> {
               textAlign: TextAlign.center,
             ),
           ),
-          Expanded(
-            flex: 1,
+          Container(
+            width: 100,
             child: Text(
               tuesday,
               style: const TextStyle(
@@ -290,10 +375,58 @@ class _ClosingTimeScreenState extends State<ClosingTimeScreen> {
               textAlign: TextAlign.center,
             ),
           ),
-          Expanded(
-            flex: 1,
+          Container(
+            width: 100,
             child: Text(
               wednesday,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: Colors.black,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          Container(
+            width: 100,
+            child: Text(
+              thursday,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: Colors.black,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          Container(
+            width: 100,
+            child: Text(
+              friday,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: Colors.black,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          Container(
+            width: 100,
+            child: Text(
+              saturday,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: Colors.black,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          Container(
+            width: 100,
+            child: Text(
+              sunday,
               style: const TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w500,

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:lottery/feature/login-register/service/auth_service.dart';
-import '../../main_screen/view/view_main_screen.dart';
 import 'register.dart';
 
 class LoginScreen extends StatefulWidget {

@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../service/data_service.dart';
-import 'ក្បាលបញ្ជី.dart';
+import 'បញ្ជីផុតម៉ោង.dart';
 import 'បញ្ជី.dart';
 import 'ភ្នាល់.dart';
 import 'កម្រៃ.dart';
 import 'ម៉ោងបិទ.dart';
+import 'លេខបិទ.dart';
 import 'របៀបបញ្ចូល.dart';
 import 'លទ្ធផល.dart';
-import 'ស្មើរសុំលុប.dart';
 import 'សរុប.dart';
 import 'drawer.dart';
 
@@ -138,11 +138,11 @@ class MainScreen extends StatelessWidget {
         _buildGridButton(context, Icons.add, 'ភ្នាល់'),
         _buildGridButton(context, Icons.attach_money, 'កម្រៃ'),
         _buildGridButton(context, Icons.list, 'បញ្ជី'),
-        _buildGridButton(context, Icons.book, 'ក្បាលបញ្ជី'),
+        _buildGridButton(context, Icons.book, 'បញ្ជីផុតម៉ោង'),
         _buildGridButton(context, Icons.exit_to_app, 'លទ្ធផល'),
-        _buildGridButton(context, Icons.delete, 'ស្មើរសុំលុប'),
         _buildGridButton(context, Icons.abc, 'របៀបបញ្ចូល'),
         _buildGridButton(context, Icons.access_time, 'ម៉ោងបិទ'),
+        _buildGridButton(context, Icons.numbers, 'លេខបិទ'),
       ],
     );
   }
@@ -159,7 +159,7 @@ class MainScreen extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
           onTap: () {
-            if (label == 'ក្បាលបញ្ជី') {
+            if (label == 'បញ្ជីផុតម៉ោង') {
               Get.to(() => const LedgerScreen());
             } else if (label == 'បញ្ជី') {
               Get.to(() => const ListScreen());
@@ -173,10 +173,10 @@ class MainScreen extends StatelessWidget {
               Get.to(() => const InputMethodScreen());
             } else if (label == 'លទ្ធផល') {
               Get.to(() => const ResultScreen());
-            } else if (label == 'ស្មើរសុំលុប') {
-              Get.to(() => const DeleteRequestScreen());
             } else if (label == 'សរុប') {
               Get.to(() => const TotalListScreen());
+            } else if (label == 'លេខបិទ') {
+              Get.to(() => const ClosingNumbersScreen());
             } else {
               debugPrint('Pressed: $label');
             }

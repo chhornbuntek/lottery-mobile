@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:lottery/core/config.dart';
+import 'package:lottery/core/firebase_option.dart';
+import 'package:lottery/core/firebase_service.dart';
 import 'package:lottery/feature/login-register/service/auth_service.dart';
 import 'package:lottery/feature/main_screen/service/data_service.dart';
 import 'package:lottery/feature/login-register/view/login_screen.dart';
@@ -9,6 +12,9 @@ import 'package:lottery/feature/main_screen/view/view_main_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize Firebase
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   // Initialize Supabase
   await Supabase.initialize(
@@ -19,6 +25,7 @@ void main() async {
   // Initialize Services
   Get.put(AuthService());
   Get.put(DataService());
+  Get.put(FirebaseService());
 
   runApp(const LotteryApp());
 }

@@ -25,7 +25,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
           },
         ),
         title: const Text(
-          'ក្បាលបញ្ជី',
+          'បញ្ជីផុតម៉ោង',
           style: TextStyle(
             color: Colors.white,
             fontSize: 20,

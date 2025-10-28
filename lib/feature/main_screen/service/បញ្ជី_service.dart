@@ -111,7 +111,21 @@ class ListService extends GetxController {
 
     // Process WINNING RESULTS to get both bet amounts and payout amounts
     // This matches the React admin logic which uses bet_results table directly
+    // Deduplicate by bet_id + number_type + channel_code to avoid counting same bet multiple times
+    Set<String> processedResults = {};
+
     for (var result in winningResults) {
+      // Create unique key for this result
+      String resultKey =
+          '${result['bet_id']}_${result['number_type']}_${result['channel_code']}';
+
+      // Skip if already processed
+      if (processedResults.contains(resultKey)) {
+        print('Skipping duplicate result: $resultKey');
+        continue;
+      }
+
+      processedResults.add(resultKey);
       try {
         Map<String, dynamic> betInfo = result['bets'] ?? {};
         String agentId = betInfo['user_id'] ?? '';

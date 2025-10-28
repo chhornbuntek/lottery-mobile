@@ -190,12 +190,12 @@ class _CommissionScreenState extends State<CommissionScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        _buildDataItem(
-          'ប្រាក់រង្វាន់',
-          '${_todayCommission?.totalCommissionAmount ?? 0} ៛',
-          isUnderlined: true,
-        ),
-        const SizedBox(height: 12),
+        // _buildDataItem(
+        //   'ប្រាក់រង្វាន់',
+        //   '${_todayCommission?.totalCommissionAmount ?? 0} ៛',
+        //   isUnderlined: true,
+        // ),
+        // const SizedBox(height: 12),
         _buildDataItem(
           'សរុបភ្នាល់',
           '${_todayCommission?.totalBetAmount ?? 0} ៛',

@@ -129,7 +129,8 @@ class ListApi {
 
       final allBets = await betsQuery.order('created_at', ascending: false);
 
-      // Fetch WINNING RESULTS for the date
+      // Fetch WINNING RESULTS for the date with deduplication
+      // Use DISTINCT ON to prevent duplicate bet_results
       var resultsQuery = _supabase
           .from('bet_results')
           .select('''

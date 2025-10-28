@@ -77,6 +77,7 @@ class AuthService extends GetxController {
     required String phone,
     required String password,
     required String fullName,
+    String? adminId,
   }) async {
     try {
       _isLoading.value = true;
@@ -86,6 +87,7 @@ class AuthService extends GetxController {
         phone: phone,
         password: password,
         fullName: fullName,
+        adminId: adminId,
       );
 
       if (response.user != null) {
@@ -317,5 +319,25 @@ class AuthService extends GetxController {
       return _userProfile.value!['phone'] ?? '';
     }
     return '';
+  }
+
+  /// Get admin users for dropdown
+  Future<List<Map<String, dynamic>>> getAdminUsers() async {
+    try {
+      return await AuthApi.getAdminUsers();
+    } catch (e) {
+      print('Failed to fetch admin users: $e');
+      return [];
+    }
+  }
+
+  /// Get current user's admin_id
+  Future<String?> getCurrentUserAdminId() async {
+    try {
+      return await AuthApi.getCurrentUserAdminId();
+    } catch (e) {
+      print('Failed to get user admin_id: $e');
+      return null;
+    }
   }
 }

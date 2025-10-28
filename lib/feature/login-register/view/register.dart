@@ -19,7 +19,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
 
+  // Admin dropdown variables
+  String? _selectedAdminId;
+  List<Map<String, dynamic>> _adminUsers = [];
+  bool _isLoadingAdmins = false;
+
   final AuthService _authService = Get.find<AuthService>();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAdminUsers();
+  }
 
   @override
   void dispose() {
@@ -30,6 +41,39 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
+  Future<void> _loadAdminUsers() async {
+    setState(() {
+      _isLoadingAdmins = true;
+    });
+
+    try {
+      print('🔄 Loading admin users...');
+      final admins = await _authService.getAdminUsers();
+      print('✅ Admin users loaded: ${admins.length} admins');
+      for (var admin in admins) {
+        print('   - ${admin['full_name']} (${admin['phone']})');
+      }
+
+      setState(() {
+        _adminUsers = admins;
+        _isLoadingAdmins = false;
+      });
+    } catch (e) {
+      print('❌ Failed to load admin users: $e');
+      setState(() {
+        _isLoadingAdmins = false;
+      });
+
+      // Show error to user
+      Get.snackbar(
+        'Error',
+        'Failed to load admin users: ${e.toString()}',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+    }
+  }
+
   Future<void> _register() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -37,6 +81,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       phone: _phoneController.text.trim(),
       password: _passwordController.text.trim(),
       fullName: _fullNameController.text.trim(),
+      adminId: _selectedAdminId,
     );
 
     if (success) {
@@ -213,6 +258,68 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           }
                           return null;
                         },
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // Admin Selection Dropdown
+                      DropdownButtonFormField<String>(
+                        value: _selectedAdminId,
+                        decoration: InputDecoration(
+                          labelText: 'Select Admin',
+                          hintText: 'Choose an admin',
+                          prefixIcon: const Icon(Icons.admin_panel_settings),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(
+                              color: Color(0xFF2C5F5F),
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                        items: _adminUsers.isEmpty
+                            ? [
+                                DropdownMenuItem<String>(
+                                  value: null,
+                                  child: Text(
+                                    'No admins available',
+                                    style: TextStyle(color: Colors.grey),
+                                  ),
+                                ),
+                              ]
+                            : _adminUsers.map((admin) {
+                                return DropdownMenuItem<String>(
+                                  value: admin['id'],
+                                  child: Text(
+                                    '${admin['full_name']} (${admin['phone']})',
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                );
+                              }).toList(),
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedAdminId = value;
+                          });
+                        },
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please select an admin';
+                          }
+                          return null;
+                        },
+                        isExpanded: true,
+                        icon: _isLoadingAdmins
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.arrow_drop_down),
                       ),
 
                       const SizedBox(height: 16),

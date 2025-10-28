@@ -105,7 +105,7 @@ class CommissionsService {
     required DateTime date,
     required int totalBetAmount,
     required int betCount,
-    double commissionRate = 0.0,
+    double commissionRate = 0.0, // No commission - set to 0%
     int totalWinAmount = 0,
     int totalLossAmount = 0,
     int netProfit = 0,

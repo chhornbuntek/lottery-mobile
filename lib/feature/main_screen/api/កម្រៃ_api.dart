@@ -8,7 +8,7 @@ class CommissionsApi {
     required DateTime date,
     required int totalBetAmount,
     required int betCount,
-    double commissionRate = 0.0,
+    double commissionRate = 0.0, // No commission - set to 0%
     int totalWinAmount = 0,
     int totalLossAmount = 0,
     int netProfit = 0,
@@ -18,6 +18,15 @@ class CommissionsApi {
       if (user == null) {
         throw Exception('User not authenticated');
       }
+
+      // Get user's admin_id from profile
+      final profileResponse = await _supabase
+          .from('profile')
+          .select('admin_id')
+          .eq('id', user.id)
+          .single();
+
+      final adminId = profileResponse['admin_id'] as String?;
 
       final commissionAmount = (totalBetAmount * commissionRate / 100).round();
 
@@ -33,6 +42,7 @@ class CommissionsApi {
             'total_win_amount': totalWinAmount,
             'total_loss_amount': totalLossAmount,
             'net_profit': netProfit,
+            'admin_id': adminId, // Auto-populate admin_id
             'updated_at': DateTime.now().toIso8601String(),
           })
           .select()

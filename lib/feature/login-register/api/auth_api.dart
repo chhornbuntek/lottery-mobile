@@ -8,6 +8,7 @@ class AuthApi {
     required String phone,
     required String password,
     required String fullName,
+    String? adminId,
   }) async {
     try {
       // Format phone number as email for Supabase auth
@@ -18,6 +19,14 @@ class AuthApi {
         password: password,
         data: {'full_name': fullName, 'phone': phone},
       );
+
+      // If user was created successfully and adminId is provided, update profile
+      if (response.user != null && adminId != null) {
+        await _client
+            .from('profile')
+            .update({'admin_id': adminId})
+            .eq('id', response.user!.id);
+      }
 
       return response;
     } catch (e) {
@@ -135,6 +144,54 @@ class AuthApi {
       return response;
     } catch (e) {
       throw Exception('Password update failed: ${e.toString()}');
+    }
+  }
+
+  /// Get all admin users for dropdown selection
+  static Future<List<Map<String, dynamic>>> getAdminUsers() async {
+    try {
+      // Use Edge Function for better security and to avoid RLS issues
+      final response = await _client.functions.invoke('get-admin-users');
+
+      if (response.data != null && response.data['success'] == true) {
+        return List<Map<String, dynamic>>.from(
+          response.data['adminUsers'] ?? [],
+        );
+      } else {
+        throw Exception('Failed to fetch admin users from Edge Function');
+      }
+    } catch (e) {
+      // Fallback to direct database query if Edge Function fails
+      try {
+        final response = await _client
+            .from('profile')
+            .select('id, full_name, phone')
+            .eq('role', 'admin')
+            .order('full_name');
+
+        return List<Map<String, dynamic>>.from(response);
+      } catch (fallbackError) {
+        throw Exception('Failed to fetch admin users: ${e.toString()}');
+      }
+    }
+  }
+
+  /// Get current user's admin_id from profile
+  static Future<String?> getCurrentUserAdminId() async {
+    try {
+      final user = _client.auth.currentUser;
+      if (user == null) return null;
+
+      final response = await _client
+          .from('profile')
+          .select('admin_id')
+          .eq('id', user.id)
+          .single();
+
+      return response['admin_id'] as String?;
+    } catch (e) {
+      print('Failed to get user admin_id: $e');
+      return null;
     }
   }
 }

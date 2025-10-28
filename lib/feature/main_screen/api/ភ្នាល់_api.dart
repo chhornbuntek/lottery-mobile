@@ -61,6 +61,15 @@ class BetsApi {
         throw Exception('User not authenticated');
       }
 
+      // Get user's admin_id from profile
+      final profileResponse = await _supabase
+          .from('profile')
+          .select('admin_id')
+          .eq('id', user.id)
+          .single();
+
+      final adminId = profileResponse['admin_id'] as String?;
+
       final response = await _supabase
           .from('pending_bets')
           .insert({
@@ -78,6 +87,7 @@ class BetsApi {
               'T',
             )[0], // Current date
             'user_id': user.id,
+            'admin_id': adminId, // Auto-populate admin_id
           })
           .select()
           .single();
@@ -98,9 +108,19 @@ class BetsApi {
         throw Exception('User not authenticated');
       }
 
-      // Add user_id to all pending bets
+      // Get user's admin_id from profile
+      final profileResponse = await _supabase
+          .from('profile')
+          .select('admin_id')
+          .eq('id', user.id)
+          .single();
+
+      final adminId = profileResponse['admin_id'] as String?;
+
+      // Add user_id and admin_id to all pending bets
       for (var bet in pendingBetsData) {
         bet['user_id'] = user.id;
+        bet['admin_id'] = adminId; // Auto-populate admin_id
       }
 
       final response = await _supabase
@@ -230,6 +250,15 @@ class BetsApi {
         throw Exception('User not authenticated');
       }
 
+      // Get user's admin_id from profile
+      final profileResponse = await _supabase
+          .from('profile')
+          .select('admin_id')
+          .eq('id', user.id)
+          .single();
+
+      final adminId = profileResponse['admin_id'] as String?;
+
       // Insert bet with conditions as JSON array
       final betResponse = await _supabase
           .from('bets')
@@ -248,6 +277,7 @@ class BetsApi {
               'T',
             )[0], // Current date
             'user_id': user.id,
+            'admin_id': adminId, // Auto-populate admin_id
           })
           .select()
           .single();
@@ -269,6 +299,15 @@ class BetsApi {
         throw Exception('User not authenticated');
       }
 
+      // Get user's admin_id from profile
+      final profileResponse = await _supabase
+          .from('profile')
+          .select('admin_id')
+          .eq('id', user.id)
+          .single();
+
+      final adminId = profileResponse['admin_id'] as String?;
+
       // Prepare bets data with conditions stored as JSON array
       List<Map<String, dynamic>> cleanBetsData = [];
 
@@ -284,6 +323,7 @@ class BetsApi {
           'T',
         )[0]; // Current date
         bet['user_id'] = user.id;
+        bet['admin_id'] = adminId; // Auto-populate admin_id
         cleanBetsData.add(bet);
       }
 

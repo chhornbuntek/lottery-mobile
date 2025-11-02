@@ -112,6 +112,39 @@ class BetsService {
     }
   }
 
+  /// Delete a single pending bet by ID
+  static Future<void> deletePendingBet(int betId) async {
+    try {
+      await BetsApi.deletePendingBet(betId);
+    } catch (e) {
+      print('Error deleting pending bet: $e');
+      throw Exception('Failed to delete pending bet: $e');
+    }
+  }
+
+  /// Update existing pending bet by appending new numbers
+  static Future<BetData> updatePendingBet({
+    required int betId,
+    required List<String> newBetNumbers,
+    required String newBetPattern,
+    required int newAmountPerNumber,
+    List<String>? newConditions,
+  }) async {
+    try {
+      final response = await BetsApi.updatePendingBet(
+        betId: betId,
+        newBetNumbers: newBetNumbers,
+        newBetPattern: newBetPattern,
+        newAmountPerNumber: newAmountPerNumber,
+        newConditions: newConditions,
+      );
+      return BetData.fromMap(response);
+    } catch (e) {
+      print('Error updating pending bet: $e');
+      throw Exception('Failed to update pending bet: $e');
+    }
+  }
+
   // ========== REGULAR BETS METHODS ==========
 
   /// Insert a single bet

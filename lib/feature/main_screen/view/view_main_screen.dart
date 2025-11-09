@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../service/data_service.dart';
-import 'បញ្ជីផុតម៉ោង.dart';
+// import 'បញ្ជីផុតម៉ោង.dart';
 import 'បញ្ជី.dart';
 import 'ភ្នាល់.dart';
 import 'កម្រៃ.dart';
 import 'ម៉ោងបិទ.dart';
-import 'លេខបិទ.dart';
 import 'របៀបបញ្ចូល.dart';
 import 'លទ្ធផល.dart';
 import 'សរុប.dart';
@@ -51,10 +50,8 @@ class MainScreen extends StatelessWidget {
 
               const SizedBox(height: 30),
 
-              _buildInfoLine(),
-
-              const SizedBox(height: 40),
-
+              // _buildInfoLine(),
+              // const SizedBox(height: 40),
               _buildButtonGrid(context),
             ],
           ),
@@ -64,66 +61,73 @@ class MainScreen extends StatelessWidget {
   }
 
   Widget _buildLogoSection() {
-    return Container(
-      width: 200,
-      height: 200,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: Colors.black,
-        border: Border.all(color: Colors.grey, width: 2),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.edit, color: Colors.grey, size: 40),
-          const SizedBox(height: 10),
-          const Text(
-            'ទទួល',
-            style: TextStyle(
-              color: Colors.grey,
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
+    return ClipOval(
+      child: Image.asset(
+        'assets/logo2.png',
+        width: 220,
+        height: 220,
+        fit: BoxFit.contain,
+        errorBuilder: (context, error, stackTrace) {
+          // Debug: Print error if image fails to load
+          debugPrint('Error loading logo: $error');
+          // Fallback if image fails to load
+          return Container(
+            color: Colors.black,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.edit, color: Colors.grey, size: 40),
+                const SizedBox(height: 10),
+                const Text(
+                  'ទទួល',
+                  style: TextStyle(
+                    color: Colors.grey,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const Text(
+                  'កត់ឆ្នោត',
+                  style: TextStyle(
+                    color: Colors.grey,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                const Text(
+                  'LOTTERY-GROUP',
+                  style: TextStyle(
+                    color: Colors.grey,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
             ),
-          ),
-          const Text(
-            'កត់ឆ្នោត',
-            style: TextStyle(
-              color: Colors.grey,
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 5),
-          const Text(
-            'LOTTERY-GROUP',
-            style: TextStyle(
-              color: Colors.grey,
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
 
-  Widget _buildInfoLine() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        const Icon(Icons.refresh, color: Colors.white, size: 20),
-        const SizedBox(width: 8),
-        const Text(
-          'លេខដែលបានបិទ',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 16,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ],
-    );
-  }
+  // Widget _buildInfoLine() {
+  //   return Row(
+  //     mainAxisAlignment: MainAxisAlignment.center,
+  //     children: [
+  //       const Icon(Icons.refresh, color: Colors.white, size: 20),
+  //       const SizedBox(width: 8),
+  //       const Text(
+  //         'លេខដែលបានបិទ',
+  //         style: TextStyle(
+  //           color: Colors.white,
+  //           fontSize: 16,
+  //           fontWeight: FontWeight.w500,
+  //         ),
+  //       ),
+  //     ],
+  //   );
+  // }
 
   Widget _buildButtonGrid(BuildContext context) {
     return GridView.count(
@@ -138,11 +142,10 @@ class MainScreen extends StatelessWidget {
         _buildGridButton(context, Icons.add, 'ភ្នាល់'),
         _buildGridButton(context, Icons.attach_money, 'កម្រៃ'),
         _buildGridButton(context, Icons.list, 'បញ្ជី'),
-        _buildGridButton(context, Icons.book, 'បញ្ជីផុតម៉ោង'),
+        // _buildGridButton(context, Icons.book, 'បញ្ជីផុតម៉ោង'),
         _buildGridButton(context, Icons.exit_to_app, 'លទ្ធផល'),
         _buildGridButton(context, Icons.abc, 'របៀបបញ្ចូល'),
         _buildGridButton(context, Icons.access_time, 'ម៉ោងបិទ'),
-        _buildGridButton(context, Icons.numbers, 'លេខបិទ'),
       ],
     );
   }
@@ -159,9 +162,10 @@ class MainScreen extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
           onTap: () {
-            if (label == 'បញ្ជីផុតម៉ោង') {
-              Get.to(() => const LedgerScreen());
-            } else if (label == 'បញ្ជី') {
+            // if (label == 'បញ្ជីផុតម៉ោង') {
+            //   Get.to(() => const LedgerScreen());
+            // } else
+            if (label == 'បញ្ជី') {
               Get.to(() => const ListScreen());
             } else if (label == 'ភ្នាល់') {
               Get.to(() => const BettingScreen());
@@ -175,8 +179,6 @@ class MainScreen extends StatelessWidget {
               Get.to(() => const ResultScreen());
             } else if (label == 'សរុប') {
               Get.to(() => const TotalListScreen());
-            } else if (label == 'លេខបិទ') {
-              Get.to(() => const ClosingNumbersScreen());
             } else {
               debugPrint('Pressed: $label');
             }

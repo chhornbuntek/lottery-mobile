@@ -192,12 +192,50 @@ class _BettingScreenState extends State<BettingScreen> {
         String end = parts[1];
 
         if (start.length == 2 && end.length == 2) {
-          // 2-digit pattern: Sequential range (01-46 = 01, 02, 03, ..., 46)
-          int startNum = int.tryParse(start) ?? 0;
-          int endNum = int.tryParse(end) ?? 0;
+          // 2-digit patterns
+          // Pattern 1: 10-50 = 10, 20, 30, 40, 50 (first digit changes, last digit stays same)
+          // Example: 56-96 = 56, 66, 76, 86, 96
+          if (start[1] == end[1] && start[0] != end[0]) {
+            int lastDigit = int.parse(start[1]);
+            int startFirst = int.parse(start[0]);
+            int endFirst = int.parse(end[0]);
 
-          for (int i = startNum; i <= endNum; i++) {
-            expandedNumbers.add(i.toString().padLeft(2, '0'));
+            for (int i = startFirst; i <= endFirst; i++) {
+              expandedNumbers.add('$i$lastDigit');
+            }
+          }
+          // Pattern 2: 11-44 = 11, 22, 33, 44 (both digits change together - same digit pattern)
+          // Check if both digits are the same in start and both change together
+          else if (start[0] == start[1] &&
+              end[0] == end[1] &&
+              start[0] != end[0] &&
+              start[1] != end[1]) {
+            int startDigit = int.parse(start[0]);
+            int endDigit = int.parse(end[0]);
+
+            for (int i = startDigit; i <= endDigit; i++) {
+              expandedNumbers.add('$i$i');
+            }
+          }
+          // Pattern 3: 10-16 = 10, 11, 12, 13, 14, 15, 16 (last digit changes, first digit stays same)
+          // Example: 56-59 = 56, 57, 58, 59
+          else if (start[0] == end[0] && start[1] != end[1]) {
+            int firstDigit = int.parse(start[0]);
+            int startLast = int.parse(start[1]);
+            int endLast = int.parse(end[1]);
+
+            for (int i = startLast; i <= endLast; i++) {
+              expandedNumbers.add('$firstDigit$i');
+            }
+          }
+          // Pattern 4: Sequential range (01-46 = 01, 02, 03, ..., 46) - default fallback
+          else {
+            int startNum = int.tryParse(start) ?? 0;
+            int endNum = int.tryParse(end) ?? 0;
+
+            for (int i = startNum; i <= endNum; i++) {
+              expandedNumbers.add(i.toString().padLeft(2, '0'));
+            }
           }
         } else if (start.length == 3 && end.length == 3) {
           // 3-digit patterns
@@ -412,6 +450,16 @@ class _BettingScreenState extends State<BettingScreen> {
     int total = 0;
     for (var bet in _betList) {
       total += bet.totalAmount;
+    }
+    return total;
+  }
+
+  /// Calculate total amount from bets being edited
+  int _calculateEditModeTotalAmount() {
+    int total = 0;
+    for (var bet in _betsToEdit) {
+      final totalAmount = bet['total_amount'] as int? ?? 0;
+      total += totalAmount;
     }
     return total;
   }
@@ -684,6 +732,31 @@ class _BettingScreenState extends State<BettingScreen> {
     bool isThreeDigit =
         _expandedNumbers.isNotEmpty && _expandedNumbers.first.length == 3;
 
+    // Check money limit based on number type (2-digit or 3-digit) and lottery time
+    String numberType = isTwoDigit ? '2 លេខ' : (isThreeDigit ? '3 លេខ' : '');
+    if (numberType.isNotEmpty) {
+      try {
+        final moneyLimit = await BetsApi.getMoneyLimit(
+          time: _selectedLotteryTime!.timeName,
+          numberType: numberType,
+        );
+
+        if (moneyLimit != null && amountPerNumber > moneyLimit) {
+          Get.snackbar(
+            'កំហុស',
+            'ចំនួនប្រាក់លើសពីកម្រិត! កម្រិតសម្រាប់ $numberType គឺ: ${moneyLimit.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛',
+            backgroundColor: Colors.red,
+            colorText: Colors.white,
+            duration: const Duration(seconds: 4),
+          );
+          return;
+        }
+      } catch (e) {
+        // If error fetching limit, allow betting (fail open)
+        print('Error checking money limit: $e');
+      }
+    }
+
     // Check if specific Vietnam lottery times (6:30PM, 7:30PM, and 8:30PM)
     // These times have special multipliers for A (x4/x3) and 4P (x7/x6)
     bool isSpecificVietnamTime =
@@ -828,13 +901,19 @@ class _BettingScreenState extends State<BettingScreen> {
 
   void _clearForm() {
     // Clear everything for "ចាក់ថ្មី" button - start fresh
+    // Keep selected lottery time - don't clear it
     _nameController.clear();
     _betNumberController.clear();
     _amountController.clear();
     _expandedNumbers.clear();
-    _selectedLotteryTime = null;
+    // _selectedLotteryTime = null; // Don't clear time - keep it selected
     _checkboxes.updateAll((key, value) => false);
-    setState(() {});
+    // Clear display area - bets already inserted to database
+    setState(() {
+      _betList.clear();
+      _pendingBetIds.clear();
+      _totalAmount = 0;
+    });
   }
 
   void _clearFormPartial() {
@@ -848,6 +927,84 @@ class _BettingScreenState extends State<BettingScreen> {
   }
 
   Future<void> _processPayment() async {
+    // Check if in edit mode - get pending bets from _betsToEdit
+    if (_isEditMode && _betsToEdit.isNotEmpty) {
+      // Get all pending bet IDs from _betsToEdit
+      List<int> pendingBetIds = [];
+      for (var bet in _betsToEdit) {
+        final betId = bet['id'] as int?;
+        final source = bet['source'] as String? ?? '';
+        if (betId != null && source == 'pending_bets') {
+          pendingBetIds.add(betId);
+        }
+      }
+
+      if (pendingBetIds.isEmpty) {
+        Get.snackbar(
+          'កំហុស',
+          'មិនមានចាក់បាច់សម្រាប់បង់ប្រាក់',
+          backgroundColor: Colors.red,
+          colorText: Colors.white,
+        );
+        return;
+      }
+
+      // Show loading dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            backgroundColor: Colors.white,
+            content: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(width: 16),
+                Text('កំពុងបង់ប្រាក់...'),
+              ],
+            ),
+          );
+        },
+      );
+
+      try {
+        // Move pending bets to bets table
+        await BetsService.movePendingBetsToBets(pendingBetIds);
+
+        // Close loading dialog
+        Navigator.of(context).pop();
+
+        // Calculate total for success message
+        final editTotal = _calculateEditModeTotalAmount();
+
+        // Show success message
+        Get.snackbar(
+          'ជោគជ័យ',
+          'បានបង់ប្រាក់ជោគជ័យ! សរុប: $editTotal ៛',
+          backgroundColor: Colors.green,
+          colorText: Colors.white,
+          duration: const Duration(seconds: 3),
+        );
+
+        // Exit edit mode after payment
+        _exitEditMode();
+      } catch (e) {
+        // Close loading dialog
+        Navigator.of(context).pop();
+
+        // Show error message
+        Get.snackbar(
+          'កំហុស',
+          'មិនអាចបង់ប្រាក់បាន: $e',
+          backgroundColor: Colors.red,
+          colorText: Colors.white,
+        );
+      }
+      return;
+    }
+
+    // Normal mode - check _betList
     if (_betList.isEmpty) {
       Get.snackbar(
         'កំហុស',
@@ -1095,7 +1252,17 @@ class _BettingScreenState extends State<BettingScreen> {
       return;
     }
 
-    Get.to(() => ReceiptPreview(betList: _betList, totalAmount: _totalAmount));
+    // Get customer name and lottery time from first bet
+    final firstBet = _betList.first;
+    Get.to(
+      () => ReceiptPreview(
+        betList: _betList,
+        totalAmount: _totalAmount,
+        customerName: firstBet.customerName,
+        lotteryTime: firstBet.lotteryTime,
+        billType: _selectedBill,
+      ),
+    );
   }
 
   Future<void> _showLotteryTimeDialog() async {
@@ -1163,8 +1330,19 @@ class _BettingScreenState extends State<BettingScreen> {
                       style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                     ),
                     onTap: () {
+                      // Check if time is actually changing
+                      final isTimeChanging =
+                          _selectedLotteryTime?.id != lotteryTime.id;
+
                       setState(() {
                         _selectedLotteryTime = lotteryTime;
+
+                        // Clear display area if time is changing (bets already inserted)
+                        if (isTimeChanging) {
+                          _betList.clear();
+                          _pendingBetIds.clear();
+                          _totalAmount = 0;
+                        }
                       });
                       Navigator.of(context).pop();
                     },
@@ -1222,6 +1400,11 @@ class _BettingScreenState extends State<BettingScreen> {
   }
 
   Widget _buildHeader() {
+    // Calculate total amount: use edit mode total if editing, otherwise use normal total
+    final displayTotal = _isEditMode && _betsToEdit.isNotEmpty
+        ? _calculateEditModeTotalAmount()
+        : _totalAmount;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -1255,7 +1438,7 @@ class _BettingScreenState extends State<BettingScreen> {
               border: Border.all(color: Colors.grey.shade300),
             ),
             child: Text(
-              '$_totalAmount ៛',
+              '$displayTotal ៛',
               style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
             ),
           ),
@@ -1320,7 +1503,7 @@ class _BettingScreenState extends State<BettingScreen> {
                 ),
               ),
               Text(
-                '$_totalAmount ៛',
+                '${_isEditMode && _betsToEdit.isNotEmpty ? _calculateEditModeTotalAmount() : _totalAmount} ៛',
                 style: const TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.bold,
@@ -1462,57 +1645,90 @@ class _BettingScreenState extends State<BettingScreen> {
           children: [
             // Edit mode header
             if (_isEditMode) ...[
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    children: [
-                      ElevatedButton(
-                        onPressed: _isSaving ? null : _exitEditMode,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.grey,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  children: [
+                    ElevatedButton(
+                      onPressed: _isSaving ? null : _exitEditMode,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.grey,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 2,
+                          vertical: 2,
                         ),
-                        child: const Text(
-                          'បោះបង់',
-                          style: TextStyle(color: Colors.white, fontSize: 12),
-                        ),
+                        minimumSize: const Size(45, 28),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
-                      const SizedBox(width: 8),
-                      ElevatedButton(
-                        onPressed: _isSaving ? null : () => _saveEditedBet(),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 6,
-                          ),
+                      child: const Text(
+                        'បោះបង់',
+                        style: TextStyle(color: Colors.white, fontSize: 11),
+                      ),
+                    ),
+                    const SizedBox(width: 2),
+                    ElevatedButton(
+                      onPressed: _isSaving
+                          ? null
+                          : () {
+                              // Clear editing state to allow adding new bet
+                              setState(() {
+                                _editingBetId = null;
+                                _betBeingEdited = null;
+                                // Keep customer name and time from the group
+                                // Clear only bet numbers and amount for new bet
+                                _betNumberController.clear();
+                                _amountController.clear();
+                                _expandedNumbers.clear();
+                              });
+                            },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 2,
+                          vertical: 2,
                         ),
-                        child: _isSaving
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(
-                                    Colors.white,
-                                  ),
-                                ),
-                              )
-                            : const Text(
-                                'រក្សាទុក',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
+                        minimumSize: const Size(55, 28),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text(
+                        'បន្ថែមថ្មី',
+                        style: TextStyle(color: Colors.white, fontSize: 11),
+                      ),
+                    ),
+                    const SizedBox(width: 2),
+                    ElevatedButton(
+                      onPressed: _isSaving ? null : () => _saveEditedBet(),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 2,
+                          vertical: 2,
+                        ),
+                        minimumSize: const Size(45, 28),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: _isSaving
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  Colors.white,
                                 ),
                               ),
-                      ),
-                    ],
-                  ),
-                ],
+                            )
+                          : const Text(
+                              'រក្សាទុក',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                              ),
+                            ),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 5),
             ],
@@ -1903,9 +2119,39 @@ class _BettingScreenState extends State<BettingScreen> {
                   '',
                   Colors.red,
                   onPressed: () async {
-                    // If in edit mode, save the edited bet
-                    if (_isEditMode && _editingBetId != null) {
-                      await _saveEditedBet();
+                    // If in edit mode, check if we're editing or adding new bet
+                    if (_isEditMode) {
+                      // If editing an existing bet, save it
+                      if (_editingBetId != null) {
+                        await _saveEditedBet();
+                        return;
+                      }
+
+                      // If not editing (form is filled), add new bet to the same group
+                      if (_selectedLotteryTime != null &&
+                          _nameController.text.trim().isNotEmpty &&
+                          _expandedNumbers.isNotEmpty &&
+                          _amountController.text.isNotEmpty) {
+                        // Get selected conditions
+                        List<String> currentConditions = [];
+                        _checkboxes.forEach((key, value) {
+                          if (value) currentConditions.add(key);
+                        });
+                        List<String> filteredCurrent = currentConditions
+                            .where(
+                              (condition) => !['4P', '7P'].contains(condition),
+                            )
+                            .toList();
+
+                        // Must have at least one condition selected
+                        if (filteredCurrent.isNotEmpty) {
+                          // Add new bet to the same group (same customer/time)
+                          await _addBetToEditGroup();
+                          return;
+                        }
+                      }
+                      // Otherwise, switch focus
+                      _switchFocus();
                       return;
                     }
 
@@ -2152,56 +2398,79 @@ class _BettingScreenState extends State<BettingScreen> {
                           final amountPerNumber =
                               bet['amount_per_number'] as int? ?? 0;
 
-                          return GestureDetector(
-                            onTap: () =>
-                                _loadBetIntoForm(bet, bets.indexOf(bet)),
-                            child: Container(
-                              margin: const EdgeInsets.only(bottom: 6),
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 6),
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? Colors.blue.shade50
+                                  : Colors.grey.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
                                 color: isSelected
-                                    ? Colors.blue.shade50
-                                    : Colors.grey.shade50,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: isSelected
-                                      ? Colors.blue
-                                      : Colors.grey.shade300,
-                                  width: isSelected ? 2 : 1,
+                                    ? Colors.blue
+                                    : Colors.grey.shade300,
+                                width: isSelected ? 2 : 1,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: GestureDetector(
+                                    onTap: () => _loadBetIntoForm(
+                                      bet,
+                                      bets.indexOf(bet),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Text(
+                                          conditionsDisplay.isEmpty
+                                              ? ''
+                                              : '$conditionsDisplay ',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.blue.shade700,
+                                          ),
+                                        ),
+                                        Expanded(
+                                          child: Text(
+                                            betPattern,
+                                            style: const TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w500,
+                                              color: Colors.orange,
+                                            ),
+                                          ),
+                                        ),
+                                        Text(
+                                          '$amountPerNumber ៛',
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w500,
+                                            color: Colors.red,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
                                 ),
-                              ),
-                              child: Row(
-                                children: [
-                                  Text(
-                                    conditionsDisplay.isEmpty
-                                        ? ''
-                                        : '$conditionsDisplay ',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                      color: Colors.blue.shade700,
+                                GestureDetector(
+                                  onTap: () => _deleteBetFromEditGroup(bet),
+                                  child: Container(
+                                    padding: const EdgeInsets.all(4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.red.shade100,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Icon(
+                                      Icons.delete,
+                                      size: 16,
+                                      color: Colors.red.shade700,
                                     ),
                                   ),
-                                  Expanded(
-                                    child: Text(
-                                      betPattern,
-                                      style: const TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w500,
-                                        color: Colors.orange,
-                                      ),
-                                    ),
-                                  ),
-                                  Text(
-                                    '$amountPerNumber ៛',
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w500,
-                                      color: Colors.red,
-                                    ),
-                                  ),
-                                ],
-                              ),
+                                ),
+                              ],
                             ),
                           );
                         }).toList(),
@@ -2416,6 +2685,43 @@ class _BettingScreenState extends State<BettingScreen> {
         return;
       }
 
+      // Check money limit based on number type (2-digit or 3-digit) and lottery time
+      bool isTwoDigitForLimit =
+          expandedBetNumbers.isNotEmpty && expandedBetNumbers.first.length == 2;
+      bool isThreeDigitForLimit =
+          expandedBetNumbers.isNotEmpty && expandedBetNumbers.first.length == 3;
+
+      String numberTypeForLimit = isTwoDigitForLimit
+          ? '2 លេខ'
+          : (isThreeDigitForLimit ? '3 លេខ' : '');
+      if (numberTypeForLimit.isNotEmpty && _selectedLotteryTime != null) {
+        try {
+          final moneyLimit = await BetsApi.getMoneyLimit(
+            time: _selectedLotteryTime!.timeName,
+            numberType: numberTypeForLimit,
+          );
+
+          if (moneyLimit != null && amountPerNumber > moneyLimit) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'ចំនួនប្រាក់លើសពីកម្រិត! កម្រិតសម្រាប់ $numberTypeForLimit គឺ: ${moneyLimit.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛',
+                ),
+                backgroundColor: Colors.red,
+                duration: const Duration(seconds: 4),
+              ),
+            );
+            setState(() {
+              _isSaving = false;
+            });
+            return;
+          }
+        } catch (e) {
+          // If error fetching limit, allow betting (fail open)
+          print('Error checking money limit: $e');
+        }
+      }
+
       // Get selected conditions from checkboxes
       List<String> selectedConditions = [];
       _checkboxes.forEach((key, value) {
@@ -2627,6 +2933,328 @@ class _BettingScreenState extends State<BettingScreen> {
     }
   }
 
+  /// Delete a bet from edit group
+  Future<void> _deleteBetFromEditGroup(Map<String, dynamic> bet) async {
+    final betId = bet['id'] as int?;
+    final source = bet['source'] as String? ?? '';
+
+    if (betId == null) {
+      Get.snackbar(
+        'កំហុស',
+        'មិនមាន ID សម្រាប់លុប',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+      return;
+    }
+
+    // Show confirmation dialog
+    bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: Colors.white,
+          title: const Text(
+            'លុបភ្នាល់',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          content: const Text(
+            'តើអ្នកចង់លុបភ្នាល់នេះទេ?',
+            style: TextStyle(fontSize: 14),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('បោះបង់'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('លុប'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm != true) return;
+
+    try {
+      // Delete from database based on source
+      if (source == 'pending_bets') {
+        await BetsService.deletePendingBet(betId);
+      } else if (source == 'bets') {
+        await BetsService.deleteBet(betId);
+      }
+
+      // Remove from edit list
+      setState(() {
+        _betsToEdit.removeWhere((b) => (b['id'] as int?) == betId);
+
+        // If the deleted bet was being edited, clear editing state
+        if (_editingBetId == betId) {
+          _editingBetId = null;
+          _betBeingEdited = null;
+          _clearFormPartial();
+        }
+      });
+
+      // Show success message
+      Get.snackbar(
+        'ជោគជ័យ',
+        'បានលុបភ្នាល់ជោគជ័យ',
+        backgroundColor: Colors.green,
+        colorText: Colors.white,
+      );
+    } catch (e) {
+      // Show error message
+      Get.snackbar(
+        'កំហុស',
+        'មិនអាចលុបភ្នាល់បាន: $e',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+    }
+  }
+
+  /// Add a new bet to the edit group (same customer/time)
+  Future<void> _addBetToEditGroup() async {
+    // Get the first bet from the group to use its customer name and time
+    if (_betsToEdit.isEmpty) {
+      Get.snackbar(
+        'កំហុស',
+        'មិនមានភ្នាល់ក្នុងក្រុម',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+      return;
+    }
+
+    final firstBet = _betsToEdit.first;
+    final groupCustomerName = firstBet['customer_name'] as String? ?? '';
+    final groupLotteryTime = firstBet['lottery_time'] as String? ?? '';
+    final groupLotteryTimeId = firstBet['lottery_time_id'] as int?;
+
+    // Auto-fill form with group's customer name and time if they don't match
+    // This ensures new bets are always added to the same group
+    if (_nameController.text.trim() != groupCustomerName ||
+        _selectedLotteryTime?.timeName != groupLotteryTime) {
+      // Auto-fill with group values
+      setState(() {
+        _nameController.text = groupCustomerName;
+        // Load lottery time if needed
+        if (_selectedLotteryTime?.timeName != groupLotteryTime) {
+          // Try to load from existing lottery time, otherwise create basic one
+          if (groupLotteryTimeId != null && groupLotteryTime.isNotEmpty) {
+            // We'll load it in the async part if needed
+            _selectedLotteryTime = LotteryTime(
+              id: groupLotteryTimeId,
+              timeName: groupLotteryTime,
+              timeCategory: 'vietnam', // Default, will be updated if needed
+              sortOrder: 0,
+              isActive: true,
+              createdAt: DateTime.now(),
+              updatedAt: DateTime.now(),
+            );
+          }
+        }
+      });
+
+      // Try to load proper lottery time if we have the ID
+      if (groupLotteryTimeId != null) {
+        try {
+          final lotteryTimes = await LotteryTimesService.getAllLotteryTimes();
+          final matchedTime = lotteryTimes.firstWhere(
+            (lt) =>
+                lt.id == groupLotteryTimeId || lt.timeName == groupLotteryTime,
+            orElse: () => LotteryTime(
+              id: groupLotteryTimeId,
+              timeName: groupLotteryTime,
+              timeCategory: 'vietnam',
+              sortOrder: 0,
+              isActive: true,
+              createdAt: DateTime.now(),
+              updatedAt: DateTime.now(),
+            ),
+          );
+          setState(() {
+            _selectedLotteryTime = matchedTime;
+          });
+        } catch (e) {
+          // Keep the basic one we created
+          print('Error loading lottery time: $e');
+        }
+      }
+    }
+
+    // Use the same validation and calculation as _addNewBet
+    // Get selected conditions and filter out shortcuts
+    List<String> selectedConditions = [];
+    _checkboxes.forEach((key, value) {
+      if (value) selectedConditions.add(key);
+    });
+
+    // Filter out shortcut conditions (4P, 7P) - only store actual conditions
+    List<String> filteredConditions = selectedConditions
+        .where((condition) => !['4P', '7P'].contains(condition))
+        .toList();
+
+    if (filteredConditions.isEmpty) {
+      Get.snackbar(
+        'កំហុស',
+        'សូមជ្រើសរើសលក្ខខណ្ឌ',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+      return;
+    }
+
+    // Check if any selected posts are closed
+    List<String> closedPosts = await _checkClosedPosts(
+      groupLotteryTime,
+      filteredConditions,
+    );
+
+    if (closedPosts.isNotEmpty) {
+      String closedPostsStr = closedPosts.join(', ');
+      Get.snackbar(
+        'បិទហើយ',
+        'ឥឡូវនេះបិទសម្រាប់ post $closedPostsStr',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+        duration: const Duration(seconds: 4),
+      );
+      return;
+    }
+
+    // Calculate total amount with multiplier logic (same as _addNewBet)
+    int multiplier = 0;
+    bool isTwoDigit =
+        _expandedNumbers.isNotEmpty && _expandedNumbers.first.length == 2;
+    bool isThreeDigit =
+        _expandedNumbers.isNotEmpty && _expandedNumbers.first.length == 3;
+
+    // Check money limit
+    String numberType = isTwoDigit ? '2 លេខ' : (isThreeDigit ? '3 លេខ' : '');
+    int amountPerNumber = int.tryParse(_amountController.text) ?? 0;
+    if (numberType.isNotEmpty) {
+      try {
+        final moneyLimit = await BetsApi.getMoneyLimit(
+          time: groupLotteryTime,
+          numberType: numberType,
+        );
+
+        if (moneyLimit != null && amountPerNumber > moneyLimit) {
+          Get.snackbar(
+            'កំហុស',
+            'ចំនួនប្រាក់លើសពីកម្រិត! កម្រិតសម្រាប់ $numberType គឺ: ${moneyLimit.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛',
+            backgroundColor: Colors.red,
+            colorText: Colors.white,
+            duration: const Duration(seconds: 4),
+          );
+          return;
+        }
+      } catch (e) {
+        print('Error checking money limit: $e');
+      }
+    }
+
+    // Check if specific Vietnam lottery times
+    bool isSpecificVietnamTime =
+        groupLotteryTime == 'យួន 6:30PM' ||
+        groupLotteryTime == 'យួន 7:30PM' ||
+        groupLotteryTime == 'យួន 8:30PM';
+    bool isVietnam130PM = groupLotteryTime == 'យួន 1:30PM';
+    bool isVietnamLoSpecialTime =
+        groupLotteryTime == 'យួន 10:30AM' ||
+        groupLotteryTime == 'យួន 2:30PM' ||
+        groupLotteryTime == 'យួន 4:30PM';
+    bool isVietnamLoHighMultiplierTime =
+        groupLotteryTime == 'យួន 6:30PM' ||
+        groupLotteryTime == 'យួន 7:30PM' ||
+        groupLotteryTime == 'យួន 8:30PM';
+
+    // Calculate multiplier for each selected condition
+    for (String condition in filteredConditions) {
+      int conditionMultiplier = 1;
+
+      if (isVietnamLoHighMultiplierTime && condition == 'Lo') {
+        conditionMultiplier = isTwoDigit ? 32 : (isThreeDigit ? 25 : 1);
+      } else if (isSpecificVietnamTime && condition == 'A') {
+        conditionMultiplier = isTwoDigit ? 4 : (isThreeDigit ? 3 : 1);
+      } else if (isSpecificVietnamTime && condition == '4P') {
+        conditionMultiplier = isTwoDigit ? 7 : (isThreeDigit ? 6 : 1);
+      } else if (isVietnam130PM && condition == 'Lo') {
+        conditionMultiplier = isTwoDigit ? 20 : (isThreeDigit ? 16 : 1);
+      } else if (isVietnamLoSpecialTime && condition == 'Lo') {
+        conditionMultiplier = isTwoDigit ? 23 : (isThreeDigit ? 19 : 1);
+      } else if (condition == '4P') {
+        conditionMultiplier = 4;
+      } else if (condition == '7P') {
+        conditionMultiplier = 7;
+      } else {
+        conditionMultiplier = 1;
+      }
+
+      multiplier += conditionMultiplier;
+    }
+
+    int totalAmount = _expandedNumbers.length * amountPerNumber * multiplier;
+
+    try {
+      // Store in pending bets table (same as _addNewBet)
+      final pendingBet = await BetsService.insertPendingBet(
+        customerName: groupCustomerName,
+        lotteryTimeId: groupLotteryTimeId ?? _selectedLotteryTime!.id,
+        lotteryTime: groupLotteryTime,
+        betPattern: _betNumberController.text.trim(),
+        betNumbers: List.from(_expandedNumbers),
+        amountPerNumber: amountPerNumber,
+        totalAmount: totalAmount,
+        multiplier: multiplier,
+        billType: _selectedBill,
+        selectedConditions: filteredConditions,
+      );
+
+      // Add to edit list
+      if (pendingBet.id != null) {
+        setState(() {
+          _betsToEdit.add({
+            'id': pendingBet.id,
+            'source': 'pending_bets',
+            'customer_name': groupCustomerName,
+            'lottery_time_id': groupLotteryTimeId ?? _selectedLotteryTime!.id,
+            'lottery_time': groupLotteryTime,
+            'bet_pattern': _betNumberController.text.trim(),
+            'bet_numbers': List.from(_expandedNumbers),
+            'amount_per_number': amountPerNumber,
+            'total_amount': totalAmount,
+            'selected_conditions': filteredConditions,
+            'multiplier': multiplier,
+          });
+        });
+
+        // Clear only bet numbers and amount, keep customer name, time, and conditions
+        _clearFormPartial();
+
+        // Show success message
+        Get.snackbar(
+          'ជោគជ័យ',
+          'បានបញ្ចូលភ្នាល់ថ្មីទៅក្នុងក្រុម',
+          backgroundColor: Colors.green,
+          colorText: Colors.white,
+        );
+      }
+    } catch (e) {
+      Get.snackbar(
+        'កំហុស',
+        'មិនអាចបញ្ចូលភ្នាល់បាន: $e',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+    }
+  }
+
   /// Exit edit mode
   void _exitEditMode() {
     setState(() {
@@ -2802,12 +3430,15 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
     };
   }
 
-  /// Toggle group selection (allow selecting any group)
+  /// Toggle group selection (allow selecting only one group at a time for editing)
   void _toggleGroupSelection(String groupKey) {
     setState(() {
       if (_selectedGroups.contains(groupKey)) {
+        // Deselect if already selected
         _selectedGroups.remove(groupKey);
       } else {
+        // Clear all selections and select only this one (single selection)
+        _selectedGroups.clear();
         _selectedGroups.add(groupKey);
       }
     });
@@ -3055,6 +3686,108 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
     }
 
     return betIds;
+  }
+
+  /// Get all paid bet IDs from selected groups
+  List<int> _getSelectedPaidBetIds() {
+    final List<int> betIds = [];
+    final groupedBets = _groupBetsByCustomerTime();
+
+    for (var selectedKey in _selectedGroups) {
+      final groupBets = groupedBets[selectedKey] ?? [];
+      for (var bet in groupBets) {
+        final betId = bet['id'] as int?;
+        final source = bet['source'] as String? ?? '';
+        if (betId != null && source == 'bets') {
+          betIds.add(betId);
+        }
+      }
+    }
+
+    return betIds;
+  }
+
+  /// Cancel payment for selected groups (move bets back to pending_bets)
+  Future<void> _cancelPayment() async {
+    final selectedBetIds = _getSelectedPaidBetIds();
+
+    if (selectedBetIds.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('សូមជ្រើសរើសភ្នាល់ដែលអ្នកចង់បោះបង់បង់ប្រាក់'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isProcessing = true;
+    });
+
+    try {
+      // Show loading dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            backgroundColor: Colors.white,
+            content: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                CircularProgressIndicator(),
+                SizedBox(width: 16),
+                Text('កំពុងបោះបង់បង់ប្រាក់...'),
+              ],
+            ),
+          );
+        },
+      );
+
+      // Move bets back to pending_bets table
+      await BetsService.moveBetsToPendingBets(selectedBetIds);
+
+      // Close loading dialog
+      if (mounted) {
+        Navigator.of(context).pop(); // Close loading dialog
+
+        // Store count before clearing selections
+        final cancelledCount = _selectedGroups.length;
+
+        // Refresh data from database to show updated status
+        await _refreshData();
+
+        // Show success message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('បានបោះបង់បង់ប្រាក់ជោគជ័យ! ចំនួន: $cancelledCount'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      // Close loading dialog
+      if (mounted) {
+        Navigator.of(context).pop(); // Close loading dialog
+
+        // Show error message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('មិនអាចបោះបង់បង់ប្រាក់បាន: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+          _selectedGroups.clear();
+        });
+      }
+    }
   }
 
   /// Process payment for selected groups
@@ -3634,170 +4367,429 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
           ),
           // Edit and Pay buttons (if groups are selected)
           if (_selectedGroups.isNotEmpty)
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border(
-                  top: BorderSide(color: Colors.grey.shade300, width: 1),
-                ),
-              ),
-              child: SafeArea(
-                child: Column(
-                  children: [
-                    // Edit button - get bets from selected groups and call onEdit
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: _isProcessing || _selectedGroups.isEmpty
-                            ? null
-                            : () {
-                                // Get all bets from selected groups
-                                final groupedBets = _groupBetsByCustomerTime();
-                                List<Map<String, dynamic>> betsToEdit = [];
+            Builder(
+              builder: (context) {
+                // Only allow editing if exactly one group is selected
+                final isSingleGroupSelected = _selectedGroups.length == 1;
 
-                                for (var selectedKey in _selectedGroups) {
-                                  final groupBets =
-                                      groupedBets[selectedKey] ?? [];
-                                  betsToEdit.addAll(groupBets);
-                                }
+                if (!isSingleGroupSelected) {
+                  // If multiple groups selected, don't show Edit button
+                  final groupedBets = _groupBetsByCustomerTime();
+                  bool hasPendingBets = false;
+                  bool hasPaidBets = false;
 
-                                if (betsToEdit.isEmpty) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'គ្មានទិន្នន័យដើម្បីកែប្រែ',
+                  // Check if any selected groups have pending bets (for Pay button)
+                  for (var selectedKey in _selectedGroups) {
+                    final groupBets = groupedBets[selectedKey] ?? [];
+                    if (groupBets.any(
+                      (bet) =>
+                          (bet['source'] as String? ?? '') == 'pending_bets',
+                    )) {
+                      hasPendingBets = true;
+                    }
+                    if (groupBets.any(
+                      (bet) => (bet['source'] as String? ?? '') == 'bets',
+                    )) {
+                      hasPaidBets = true;
+                    }
+                  }
+
+                  // Show Pay and Cancel Payment buttons for multiple selections
+                  return Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      border: Border(
+                        top: BorderSide(color: Colors.grey.shade300, width: 1),
+                      ),
+                    ),
+                    child: SafeArea(
+                      child: Column(
+                        children: [
+                          // Pay button (only for groups with pending bets)
+                          if (hasPendingBets) ...[
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton(
+                                onPressed:
+                                    _isProcessing || _selectedGroups.isEmpty
+                                    ? null
+                                    : _processPayment,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF2C5F5F),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 16,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                                child: _isProcessing
+                                    ? const SizedBox(
+                                        height: 20,
+                                        width: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          valueColor:
+                                              AlwaysStoppedAnimation<Color>(
+                                                Colors.white,
+                                              ),
+                                        ),
+                                      )
+                                    : Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          const Icon(
+                                            Icons.payment,
+                                            color: Colors.white,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            'បង់ប្រាក់ (${_selectedGroups.length})',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                      backgroundColor: Colors.orange,
-                                    ),
-                                  );
-                                  return;
-                                }
-
-                                // Close bottom sheet and call onEdit
-                                Navigator.of(context).pop();
-                                widget.onEdit(betsToEdit);
-                              },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.edit, color: Colors.white),
-                            const SizedBox(width: 8),
-                            Text(
-                              _editingBetIds.isEmpty
-                                  ? 'កែប្រែ (${_selectedGroups.length})'
-                                  : 'កែប្រែ (${_editingBetIds.length})',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
                               ),
                             ),
                           ],
-                        ),
+                          // Cancel Payment button (only for groups with paid bets)
+                          if (hasPaidBets) ...[
+                            if (hasPendingBets) const SizedBox(height: 12),
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton(
+                                onPressed:
+                                    _isProcessing || _selectedGroups.isEmpty
+                                    ? null
+                                    : _cancelPayment,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.red,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 16,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                                child: _isProcessing
+                                    ? const SizedBox(
+                                        height: 20,
+                                        width: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          valueColor:
+                                              AlwaysStoppedAnimation<Color>(
+                                                Colors.white,
+                                              ),
+                                        ),
+                                      )
+                                    : Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          const Icon(
+                                            Icons.cancel,
+                                            color: Colors.white,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            'បោះបង់បង់ប្រាក់ (${_selectedGroups.length})',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
-                    // Save button (only shown when bets are being edited)
-                    if (_editingBetIds.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: _isProcessing ? null : _saveEditedBets,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                          child: _isProcessing
-                              ? const SizedBox(
-                                  height: 20,
-                                  width: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                      Colors.white,
-                                    ),
-                                  ),
-                                )
-                              : const Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.save, color: Colors.white),
-                                    SizedBox(width: 8),
-                                    Text(
-                                      'រក្សាទុក',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
+                  );
+                }
+
+                // Single group selected - check if it has pending bets (unpaid)
+                final groupedBets = _groupBetsByCustomerTime();
+                final selectedKey = _selectedGroups.first;
+                final groupBets = groupedBets[selectedKey] ?? [];
+
+                // Only collect pending bets (unpaid)
+                final pendingBets = groupBets.where((bet) {
+                  final source = bet['source'] as String? ?? '';
+                  return source == 'pending_bets';
+                }).toList();
+
+                final hasPendingBetsToEdit = pendingBets.isNotEmpty;
+
+                // Check if any selected groups have pending bets (for Pay button)
+                bool hasPendingBets = false;
+                for (var key in _selectedGroups) {
+                  final bets = groupedBets[key] ?? [];
+                  if (bets.any(
+                    (bet) => (bet['source'] as String? ?? '') == 'pending_bets',
+                  )) {
+                    hasPendingBets = true;
+                    break;
+                  }
+                }
+
+                // Check if any selected groups have paid bets (for Cancel Payment button)
+                bool hasPaidBetsForCancel = false;
+                for (var key in _selectedGroups) {
+                  final bets = groupedBets[key] ?? [];
+                  if (bets.any(
+                    (bet) => (bet['source'] as String? ?? '') == 'bets',
+                  )) {
+                    hasPaidBetsForCancel = true;
+                    break;
+                  }
+                }
+
+                return Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border(
+                      top: BorderSide(color: Colors.grey.shade300, width: 1),
+                    ),
+                  ),
+                  child: SafeArea(
+                    child: Column(
+                      children: [
+                        // Edit button - only for single unpaid group (pending bets)
+                        if (hasPendingBetsToEdit)
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed: _isProcessing
+                                  ? null
+                                  : () {
+                                      // Get only pending bets from selected group (unpaid only)
+                                      final groupedBets =
+                                          _groupBetsByCustomerTime();
+                                      final selectedKey = _selectedGroups.first;
+                                      final groupBets =
+                                          groupedBets[selectedKey] ?? [];
+
+                                      // Only add pending bets (unpaid)
+                                      final betsToEdit = groupBets.where((bet) {
+                                        final source =
+                                            bet['source'] as String? ?? '';
+                                        return source == 'pending_bets';
+                                      }).toList();
+
+                                      if (betsToEdit.isEmpty) {
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          const SnackBar(
+                                            content: Text(
+                                              'គ្មានទិន្នន័យដើម្បីកែប្រែ',
+                                            ),
+                                            backgroundColor: Colors.orange,
+                                          ),
+                                        );
+                                        return;
+                                      }
+
+                                      // Close bottom sheet and call onEdit
+                                      // Only unpaid bets (pending_bets) are passed
+                                      Navigator.of(context).pop();
+                                      widget.onEdit(betsToEdit);
+                                    },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 16,
                                 ),
-                        ),
-                      ),
-                    ],
-                    // Pay button (only for groups with pending bets)
-                    if (hasPendingBets) ...[
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: _isProcessing || _selectedGroups.isEmpty
-                              ? null
-                              : _processPayment,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF2C5F5F),
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                          child: _isProcessing
-                              ? const SizedBox(
-                                  height: 20,
-                                  width: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                      Colors.white,
-                                    ),
-                                  ),
-                                )
-                              : Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    const Icon(
-                                      Icons.payment,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Icon(Icons.edit, color: Colors.white),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'កែប្រែ (${pendingBets.length})',
+                                    style: const TextStyle(
                                       color: Colors.white,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
                                     ),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      'បង់ប្រាក់ (${_selectedGroups.length})',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        // Save button (only shown when bets are being edited)
+                        if (_editingBetIds.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed: _isProcessing ? null : _saveEditedBets,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.green,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 16,
                                 ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                              child: _isProcessing
+                                  ? const SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor:
+                                            AlwaysStoppedAnimation<Color>(
+                                              Colors.white,
+                                            ),
+                                      ),
+                                    )
+                                  : const Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Icon(Icons.save, color: Colors.white),
+                                        SizedBox(width: 8),
+                                        Text(
+                                          'រក្សាទុក',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                            ),
+                          ),
+                        ],
+                        // Pay button (only for groups with pending bets)
+                        if (hasPendingBets) ...[
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed:
+                                  _isProcessing || _selectedGroups.isEmpty
+                                  ? null
+                                  : _processPayment,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF2C5F5F),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 16,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                              child: _isProcessing
+                                  ? const SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor:
+                                            AlwaysStoppedAnimation<Color>(
+                                              Colors.white,
+                                            ),
+                                      ),
+                                    )
+                                  : Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        const Icon(
+                                          Icons.payment,
+                                          color: Colors.white,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          'បង់ប្រាក់ (${_selectedGroups.length})',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                            ),
+                          ),
+                        ],
+                        // Cancel Payment button (only for paid groups)
+                        if (hasPaidBetsForCancel) ...[
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed:
+                                  _isProcessing || _selectedGroups.isEmpty
+                                  ? null
+                                  : _cancelPayment,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.red,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 16,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                              child: _isProcessing
+                                  ? const SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor:
+                                            AlwaysStoppedAnimation<Color>(
+                                              Colors.white,
+                                            ),
+                                      ),
+                                    )
+                                  : Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        const Icon(
+                                          Icons.cancel,
+                                          color: Colors.white,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          'បោះបង់បង់ប្រាក់ (${_selectedGroups.length})',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                );
+              },
             ),
         ],
       ),

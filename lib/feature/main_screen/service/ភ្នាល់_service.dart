@@ -89,6 +89,28 @@ class BetsService {
     }
   }
 
+  /// Get bets by group summary (from bet_groups_summary)
+  /// Returns bets from both pending_bets and bets tables based on paid_count
+  static Future<List<BetData>> getBetsByGroupSummary({
+    required String customerName,
+    required String lotteryTime,
+    required DateTime date,
+    String? billType,
+  }) async {
+    try {
+      final response = await BetsApi.getBetsByGroupSummary(
+        customerName: customerName,
+        lotteryTime: lotteryTime,
+        date: date,
+        billType: billType,
+      );
+      return response.map((item) => BetData.fromMap(item)).toList();
+    } catch (e) {
+      print('Error fetching bets by group summary: $e');
+      throw Exception('Failed to get bets by group summary: $e');
+    }
+  }
+
   /// Move pending bets to bets table (when user clicks "បង់ប្រាក់")
   static Future<List<BetData>> movePendingBetsToBets(
     List<int> pendingBetIds,
@@ -99,6 +121,17 @@ class BetsService {
     } catch (e) {
       print('Error moving pending bets to bets: $e');
       throw Exception('Failed to move pending bets to bets: $e');
+    }
+  }
+
+  /// Move bets back to pending_bets table (when user cancels payment)
+  static Future<List<BetData>> moveBetsToPendingBets(List<int> betIds) async {
+    try {
+      final response = await BetsApi.moveBetsToPendingBets(betIds);
+      return response.map((item) => BetData.fromMap(item)).toList();
+    } catch (e) {
+      print('Error moving bets to pending bets: $e');
+      throw Exception('Failed to move bets to pending bets: $e');
     }
   }
 
@@ -119,6 +152,16 @@ class BetsService {
     } catch (e) {
       print('Error deleting pending bet: $e');
       throw Exception('Failed to delete pending bet: $e');
+    }
+  }
+
+  /// Delete a single bet from bets table by ID
+  static Future<void> deleteBet(int betId) async {
+    try {
+      await BetsApi.deleteBet(betId);
+    } catch (e) {
+      print('Error deleting bet: $e');
+      throw Exception('Failed to delete bet: $e');
     }
   }
 
@@ -274,6 +317,8 @@ class BetData {
   final DateTime createdAt;
   final String? userId; // User ID who created the bet
   final String? userName; // User name who created the bet
+  final String? invoiceNumber; // Invoice number
+  final bool isPaid; // Whether the bet is paid or not
 
   BetData({
     this.id,
@@ -290,6 +335,8 @@ class BetData {
     required this.createdAt,
     this.userId,
     this.userName,
+    this.invoiceNumber,
+    this.isPaid = false,
   });
 
   static String _extractUserName(Map<String, dynamic> map) {
@@ -336,6 +383,10 @@ class BetData {
       conditions = List<String>.from(map['selected_conditions']);
     }
 
+    // Determine if bet is paid based on source field
+    final source = map['source'] as String?;
+    final isPaid = source == 'bets';
+
     return BetData(
       id: map['id'],
       customerName: map['customer_name'] ?? '',
@@ -353,6 +404,8 @@ class BetData {
       ),
       userId: map['user_id'],
       userName: _extractUserName(map),
+      invoiceNumber: map['invoice_number'],
+      isPaid: isPaid,
     );
   }
 

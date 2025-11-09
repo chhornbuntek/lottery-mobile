@@ -6,18 +6,24 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:gal/gal.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../service/ភ្នាល់_service.dart';
 
 class ReceiptPreview extends StatefulWidget {
   final List<BetData> betList;
   final int totalAmount;
+  final String? customerName;
+  final String? lotteryTime;
+  final String? billType;
 
   const ReceiptPreview({
     super.key,
     required this.betList,
     required this.totalAmount,
+    this.customerName,
+    this.lotteryTime,
+    this.billType,
   });
 
   @override
@@ -37,21 +43,52 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
 
   Future<void> _fetchPendingBets() async {
     try {
-      final pendingBets = await BetsService.getUserPendingBets();
-      print('Fetched ${pendingBets.length} pending bets');
-      if (pendingBets.isNotEmpty) {
-        print('First bet user name: ${pendingBets.first.userName}');
-        print('First bet user ID: ${pendingBets.first.userId}');
-        print(
-          'First bet selected conditions: ${pendingBets.first.selectedConditions}',
+      // If customer name and lottery time are provided, use bet_groups_summary
+      if (widget.customerName != null &&
+          widget.customerName!.isNotEmpty &&
+          widget.lotteryTime != null &&
+          widget.lotteryTime!.isNotEmpty) {
+        final bets = await BetsService.getBetsByGroupSummary(
+          customerName: widget.customerName!,
+          lotteryTime: widget.lotteryTime!,
+          date: DateTime.now(),
+          billType: widget.billType,
         );
+        print('Fetched ${bets.length} bets from bet_groups_summary');
+        if (bets.isNotEmpty) {
+          print('First bet user name: ${bets.first.userName}');
+          print('First bet user ID: ${bets.first.userId}');
+          print(
+            'First bet selected conditions: ${bets.first.selectedConditions}',
+          );
+          for (int i = 0; i < bets.length; i++) {
+            print(
+              'Bet $i: numbers=${bets[i].betNumbers.join(",")}, amountPerNumber=${bets[i].amountPerNumber}, totalAmount=${bets[i].totalAmount}',
+            );
+          }
+        }
+        setState(() {
+          _fetchedBetList = bets;
+          _isLoading = false;
+        });
+      } else {
+        // Fallback to old method
+        final pendingBets = await BetsService.getUserPendingBets();
+        print('Fetched ${pendingBets.length} pending bets');
+        if (pendingBets.isNotEmpty) {
+          print('First bet user name: ${pendingBets.first.userName}');
+          print('First bet user ID: ${pendingBets.first.userId}');
+          print(
+            'First bet selected conditions: ${pendingBets.first.selectedConditions}',
+          );
+        }
+        setState(() {
+          _fetchedBetList = pendingBets;
+          _isLoading = false;
+        });
       }
-      setState(() {
-        _fetchedBetList = pendingBets;
-        _isLoading = false;
-      });
     } catch (e) {
-      print('Error fetching pending bets: $e');
+      print('Error fetching bets: $e');
       setState(() {
         _fetchedBetList = widget.betList; // Fallback to passed data
         _isLoading = false;
@@ -83,7 +120,12 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
                 child: RepaintBoundary(
                   key: _repaintBoundaryKey,
                   child: Container(
-                    width: 400, // Receipt width
+                    width: 400, // Fixed receipt width (like a physical receipt)
+                    constraints: BoxConstraints(
+                      maxWidth:
+                          MediaQuery.of(context).size.width -
+                          32, // Responsive max width
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(8),
@@ -104,243 +146,340 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
   }
 
   Widget _buildReceiptWithTemplate() {
-    return Stack(
-      children: [
-        // Background template image
-        Image.asset(
-          'assets/Invoices55555.png',
-          width: 400,
-          fit: BoxFit.contain,
+    if (_fetchedBetList.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32.0),
+          child: Text('មិនមានទិន្នន័យ'),
         ),
-        // Overlay data on top of the template
-        Positioned.fill(child: _buildDataOverlay()),
-      ],
-    );
-  }
-
-  Widget _buildDataOverlay() {
-    if (_fetchedBetList.isEmpty) return const SizedBox.shrink();
+      );
+    }
 
     final firstBet = _fetchedBetList.first;
     final now = DateTime.now();
 
-    return Stack(
+    return Padding(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header with Logo
+          _buildHeader(firstBet, now),
+
+          const SizedBox(height: 24),
+
+          // Customer Information
+          _buildCustomerInfo(firstBet),
+
+          const SizedBox(height: 24),
+
+          // Divider
+          const Divider(thickness: 1),
+
+          const SizedBox(height: 16),
+
+          // Bet Table
+          _buildBetTable(),
+
+          const SizedBox(height: 24),
+
+          // Footer
+          _buildFooter(now),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeader(BetData firstBet, DateTime now) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Customer Name
-        Positioned(
-          left: 90,
-          top: 80,
-          child: Text(
-            firstBet.customerName,
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              color: Colors.black,
-            ),
+        // Logo
+        ClipOval(
+          child: Image.asset(
+            'assets/logo2.png',
+            width: 80,
+            height: 80,
+            fit: BoxFit.cover,
+            errorBuilder: (context, error, stackTrace) {
+              return Container(
+                width: 80,
+                height: 80,
+                color: Colors.grey[300],
+                child: const Icon(Icons.image, size: 40),
+              );
+            },
           ),
         ),
 
-        // Bill Number
-        Positioned(
-          left: 90,
-          top: 110,
-          child: const Text(
-            'ល.រ',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              color: Colors.black,
-            ),
-          ),
-        ),
+        const SizedBox(width: 16),
 
-        // Date
-        Positioned(
-          right: 19,
-          top: 81,
-          child: Text(
-            '${now.day}/${now.month}/${now.year}',
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              color: Colors.black,
-            ),
-          ),
-        ),
-
-        // Amount in words
-        Positioned(
-          right: 50,
-          top: 175,
-          child: Text(
-            _formatAmountInWords(_calculateTotalAmount()),
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              color: Colors.black,
-            ),
-          ),
-        ),
-
-        // Selected Conditions (ប៉ុស្តិ៍)
-        Positioned(
-          left: 170,
-          top: 175,
-          child: Text(
-            firstBet.selectedConditions.join(', '),
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              color: Colors.black,
-            ),
-          ),
-        ),
-
-        // Lottery Time
-        Positioned(
-          left: 222,
-          top: 113,
-          child: Text(
-            firstBet.lotteryTime,
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              color: Colors.black,
-            ),
-          ),
-        ),
-
-        // Agent Name
-        Positioned(
-          left: 100,
-          bottom: 25,
-          child: Text(
-            _getCurrentUserName(), // Show current user name
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
-        ),
-
-        // Created At (Entry Time)
-        Positioned(
-          left: 65,
-          bottom: 55,
-          child: Text(
-            _formatCambodiaTime(now),
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
-        ),
-
-        // // Bet table rows - Serial numbers
-        // ...widget.betList.asMap().entries.map((entry) {
-        //   int index = entry.key;
-        //   return Positioned(
-        //     left: 30,
-        //     top: 200 + (index * 30),
-        //     child: Text(
-        //       '${index + 1}',
-        //       style: const TextStyle(
-        //         fontSize: 12,
-        //         fontWeight: FontWeight.bold,
-        //         color: Colors.black,
-        //       ),
-        //     ),
-        //   );
-        // }).toList(),
-
-        // Bet table rows - Bet numbers
-        ..._fetchedBetList.asMap().entries.map((entry) {
-          int index = entry.key;
-          BetData bet = entry.value;
-          return Positioned(
-            left: 50,
-            top: 175 + (index * 30),
-            child: Text(
-              bet.betPattern,
-              style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                color: Colors.black,
+        // Title and Invoice Details
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              const Text(
+                'វិក័យប័ត្រ',
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 2,
+                ),
               ),
-            ),
-          );
-        }).toList(),
-
-        // Bet table rows - Amount per number
-        ..._fetchedBetList.asMap().entries.map((entry) {
-          int index = entry.key;
-          BetData bet = entry.value;
-          return Positioned(
-            left: 110,
-            top: 175 + (index * 30),
-            child: Text(
-              '${bet.amountPerNumber}',
-              style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                color: Colors.black,
+              const SizedBox(height: 16),
+              _buildInvoiceDetailRow(
+                'លេខវិក័យប័ត្រ:',
+                firstBet.invoiceNumber ?? 'ល.រ',
               ),
-            ),
-          );
-        }).toList(),
-
-        // Bet table rows - Post/Station
-        // ...widget.betList.asMap().entries.map((entry) {
-        //   int index = entry.key;
-        //   BetData bet = entry.value;
-        //   return Positioned(
-        //     left: 250,
-        //     top: 200 + (index * 30),
-        //     child: Text(
-        //       bet.billType,
-        //       style: const TextStyle(
-        //         fontSize: 12,
-        //         fontWeight: FontWeight.bold,
-        //         color: Colors.black,
-        //       ),
-        //     ),
-        //   );
-        // }).toList(),
-
-        // Bet table rows - Total
-        // ...widget.betList.asMap().entries.map((entry) {
-        //   int index = entry.key;
-        //   BetData bet = entry.value;
-        //   return Positioned(
-        //     left: 150,
-        //     top: 200 + (index * 30),
-        //     child: Text(
-        //       '${bet.totalAmount}',
-        //       style: const TextStyle(
-        //         fontSize: 12,
-        //         fontWeight: FontWeight.bold,
-        //         color: Colors.black,
-        //       ),
-        //     ),
-        //   );
-        // }).toList(),
-
-        // Total amount
-        Positioned(
-          right: 50,
-          bottom: 55,
-          child: Text(
-            '${_calculateTotalAmount()} ៛',
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              color: Colors.red,
-            ),
+              const SizedBox(height: 4),
+              _buildInvoiceDetailRow(
+                'កាលបរិច្ឆេទ:',
+                '${now.day}/${now.month}/${now.year}',
+              ),
+              const SizedBox(height: 4),
+              _buildInvoiceDetailRow('ម៉ោងឆ្នោត:', firstBet.lotteryTime),
+              const SizedBox(height: 4),
+              _buildInvoiceDetailRowWithColor(
+                'ស្ថានភាព:',
+                _fetchedBetList.first.isPaid ? 'បានបង់' : 'មិនទាន់បង់',
+                _fetchedBetList.first.isPaid ? Colors.green : Colors.orange,
+              ),
+            ],
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildInvoiceDetailRow(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+        const SizedBox(width: 8),
+        Text(
+          value,
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildInvoiceDetailRowWithColor(
+    String label,
+    String value,
+    Color color,
+  ) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+        const SizedBox(width: 8),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCustomerInfo(BetData firstBet) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'ចេញចំពោះ:',
+          style: TextStyle(
+            fontSize: 11,
+            color: Colors.grey,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          firstBet.customerName,
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBetTable() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Table Header
+        Container(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+          decoration: BoxDecoration(
+            color: Colors.grey[200],
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: const Row(
+            children: [
+              Expanded(
+                flex: 3,
+                child: Text(
+                  'លេខភ្នាល់',
+                  textAlign: TextAlign.left,
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                ),
+              ),
+              Expanded(
+                flex: 2,
+                child: Text(
+                  'ចំនួន',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                ),
+              ),
+              Expanded(
+                flex: 2,
+                child: Text(
+                  'ប៉ុស្តិ៍',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                ),
+              ),
+              Expanded(
+                flex: 2,
+                child: Text(
+                  'សរុប',
+                  textAlign: TextAlign.right,
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 8),
+
+        // Table Rows
+        ..._fetchedBetList.asMap().entries.map((entry) {
+          int index = entry.key;
+          BetData bet = entry.value;
+
+          // Format bet numbers
+          String betNumbersDisplay = bet.betNumbers.join(', ');
+          if (bet.betNumbers.length > 10) {
+            betNumbersDisplay = '${bet.betNumbers.take(10).join(', ')}...';
+          }
+
+          // Format conditions (filter out 4P and 7P shortcuts)
+          final conditionsDisplay = bet.selectedConditions
+              .where((condition) => !['4P', '7P'].contains(condition))
+              .join(' ');
+
+          return Container(
+            key: ValueKey('bet_row_${bet.id}_$index'),
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: Colors.grey[300]!, width: 0.5),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  flex: 3,
+                  child: Text(
+                    betNumbersDisplay,
+                    textAlign: TextAlign.left,
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    '${bet.amountPerNumber}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    conditionsDisplay.isNotEmpty ? conditionsDisplay : '-',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    '${bet.totalAmount}',
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }).toList(),
+      ],
+    );
+  }
+
+  Widget _buildFooter(DateTime now) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF2C5F5F),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Total Amount
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'សរុប:',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+              Text(
+                '${_calculateTotalAmount()} ៛',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // Entry Time
+          Text(
+            'ម៉ោងបញ្ចូល: ${_formatCambodiaTime(now)}',
+            style: const TextStyle(fontSize: 11, color: Colors.white70),
+          ),
+
+          const SizedBox(height: 8),
+
+          // Agent Name
+          Text(
+            'ភ្នាក់ងារ: ${_getCurrentUserName()}',
+            style: const TextStyle(fontSize: 11, color: Colors.white70),
+          ),
+        ],
+      ),
     );
   }
 
@@ -446,18 +585,6 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
 
   Future<void> _saveReceiptToPhone() async {
     try {
-      // Request storage permission
-      var status = await Permission.storage.request();
-      if (!status.isGranted) {
-        Get.snackbar(
-          'កំហុស',
-          'មិនអាចរក្សាទុកបាន - សូមអនុញ្ញាតការចូលដំណើរការ',
-          backgroundColor: Colors.red,
-          colorText: Colors.white,
-        );
-        return;
-      }
-
       // Show loading dialog
       showDialog(
         context: context,
@@ -477,52 +604,75 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
         },
       );
 
+      // Wait a bit to ensure widget is fully rendered
+      await Future.delayed(const Duration(milliseconds: 500));
+
       // Capture the widget as image
-      RenderRepaintBoundary boundary =
-          _repaintBoundaryKey.currentContext!.findRenderObject()
-              as RenderRepaintBoundary;
+      final RenderRepaintBoundary? boundary =
+          _repaintBoundaryKey.currentContext?.findRenderObject()
+              as RenderRepaintBoundary?;
+
+      if (boundary == null) {
+        Navigator.of(context).pop();
+        Get.snackbar(
+          'កំហុស',
+          'មិនអាចរក្សាទុកបាន - សូមព្យាយាមម្តងទៀត',
+          backgroundColor: Colors.red,
+          colorText: Colors.white,
+        );
+        return;
+      }
+
       ui.Image image = await boundary.toImage(pixelRatio: 3.0);
       ByteData? byteData = await image.toByteData(
         format: ui.ImageByteFormat.png,
       );
-      Uint8List pngBytes = byteData!.buffer.asUint8List();
 
-      // Get the directory for saving
-      Directory? directory;
-      if (Platform.isAndroid) {
-        directory = await getExternalStorageDirectory();
-      } else {
-        directory = await getApplicationDocumentsDirectory();
-      }
-
-      if (directory != null) {
-        String fileName =
-            'receipt_${DateTime.now().millisecondsSinceEpoch}.png';
-        String filePath = '${directory.path}/$fileName';
-
-        File file = File(filePath);
-        await file.writeAsBytes(pngBytes);
-
-        // Close loading dialog
+      if (byteData == null) {
         Navigator.of(context).pop();
-
-        Get.snackbar(
-          'ជោគជ័យ',
-          'បានរក្សាទុកវិក័យប័ត្រ: $filePath',
-          backgroundColor: Colors.green,
-          colorText: Colors.white,
-          duration: const Duration(seconds: 3),
-        );
-      } else {
-        // Close loading dialog
-        Navigator.of(context).pop();
-
         Get.snackbar(
           'កំហុស',
-          'មិនអាចរក្សាទុកបាន',
+          'មិនអាចបំប្លែងជារូបភាពបាន',
           backgroundColor: Colors.red,
           colorText: Colors.white,
         );
+        return;
+      }
+
+      Uint8List pngBytes = byteData.buffer.asUint8List();
+
+      // Save to temporary directory first
+      final Directory tempDir = await getTemporaryDirectory();
+      final String fileName =
+          'receipt_${DateTime.now().millisecondsSinceEpoch}.png';
+      final String filePath = '${tempDir.path}/$fileName';
+      final File file = File(filePath);
+      await file.writeAsBytes(pngBytes);
+
+      // Request permission and save to gallery
+      await Gal.requestAccess();
+      await Gal.putImage(file.path);
+
+      // Close loading dialog
+      Navigator.of(context).pop();
+
+      // Check if save was successful (gal doesn't throw on success)
+      Get.snackbar(
+        'ជោគជ័យ',
+        'បានរក្សាទុកវិក័យប័ត្រ​ទៅកាន់វិចិត្រសាល',
+        backgroundColor: Colors.green,
+        colorText: Colors.white,
+        duration: const Duration(seconds: 3),
+        snackPosition: SnackPosition.TOP,
+      );
+
+      // Clean up temporary file
+      try {
+        if (await file.exists()) {
+          await file.delete();
+        }
+      } catch (e) {
+        debugPrint('Error deleting temp file: $e');
       }
     } catch (e) {
       // Close loading dialog if it's still open
@@ -530,11 +680,13 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
         Navigator.of(context).pop();
       }
 
+      debugPrint('Error saving receipt: $e');
       Get.snackbar(
         'កំហុស',
-        'មិនអាចរក្សាទុកបាន: $e',
+        'មិនអាចរក្សាទុកបាន: ${e.toString()}',
         backgroundColor: Colors.red,
         colorText: Colors.white,
+        duration: const Duration(seconds: 4),
       );
     }
   }

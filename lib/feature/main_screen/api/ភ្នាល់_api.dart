@@ -302,6 +302,59 @@ class BetsApi {
     }
   }
 
+  /// Move bets back to pending_bets table (when user cancels payment)
+  static Future<List<Map<String, dynamic>>> moveBetsToPendingBets(
+    List<int> betIds,
+  ) async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) {
+        throw Exception('User not authenticated');
+      }
+
+      // Get bets data
+      final bets = await _supabase
+          .from('bets')
+          .select('*')
+          .inFilter('id', betIds)
+          .eq('user_id', user.id);
+
+      if (bets.isEmpty) {
+        throw Exception('No bets found');
+      }
+
+      // Prepare data for pending_bets table (remove fields that don't exist in pending_bets table)
+      final pendingBetsData = bets.map((bet) {
+        final betMap = Map<String, dynamic>.from(bet);
+        // Remove fields that don't exist in pending_bets table
+        betMap.remove('id');
+        betMap.remove('created_at');
+        betMap.remove('updated_at');
+        // Add fields that exist in pending_bets but not in bets
+        betMap['is_processed'] = false;
+        // Keep invoice_number - it should be preserved from bets
+        return betMap;
+      }).toList();
+
+      // Insert into pending_bets table
+      final insertedPendingBets = await _supabase
+          .from('pending_bets')
+          .insert(pendingBetsData)
+          .select();
+
+      // Delete from bets table
+      await _supabase
+          .from('bets')
+          .delete()
+          .inFilter('id', betIds)
+          .eq('user_id', user.id);
+
+      return List<Map<String, dynamic>>.from(insertedPendingBets);
+    } catch (e) {
+      throw Exception('Failed to move bets to pending bets: $e');
+    }
+  }
+
   /// Clear all pending bets for current user
   static Future<void> clearAllPendingBets() async {
     try {
@@ -331,6 +384,24 @@ class BetsApi {
           .eq('user_id', user.id);
     } catch (e) {
       throw Exception('Failed to delete pending bet: $e');
+    }
+  }
+
+  /// Delete a single bet from bets table by ID
+  static Future<void> deleteBet(int betId) async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) {
+        throw Exception('User not authenticated');
+      }
+
+      await _supabase
+          .from('bets')
+          .delete()
+          .eq('id', betId)
+          .eq('user_id', user.id);
+    } catch (e) {
+      throw Exception('Failed to delete bet: $e');
     }
   }
 
@@ -689,6 +760,108 @@ class BetsApi {
     }
   }
 
+  /// Get bets by IDs from bet_groups_summary
+  /// Returns bets from both pending_bets and bets tables based on paid_count
+  static Future<List<Map<String, dynamic>>> getBetsByGroupSummary({
+    required String customerName,
+    required String lotteryTime,
+    required DateTime date,
+    String? billType,
+  }) async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) {
+        throw Exception('User not authenticated');
+      }
+
+      String formattedDate =
+          '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+
+      // Get group summary
+      var query = _supabase
+          .from('bet_groups_summary')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('customer_name', customerName)
+          .eq('lottery_time', lotteryTime)
+          .eq('bet_date', formattedDate);
+
+      if (billType != null && billType.isNotEmpty) {
+        query = query.eq('bill_type', billType);
+      }
+
+      final groups = await query;
+
+      if (groups.isEmpty) {
+        return [];
+      }
+
+      final group = groups.first;
+      final betIds = (group['bet_ids'] as List<dynamic>?) ?? [];
+      final paidCount = (group['paid_count'] as int?) ?? 0;
+      final pendingCount = (group['pending_count'] as int?) ?? 0;
+
+      if (betIds.isEmpty) {
+        return [];
+      }
+
+      // Convert bet_ids to integers
+      List<int> betIdInts = betIds
+          .map((id) => int.tryParse(id.toString()) ?? 0)
+          .where((id) => id > 0)
+          .toList();
+
+      if (betIdInts.isEmpty) {
+        return [];
+      }
+
+      List<Map<String, dynamic>> allBets = [];
+
+      // Get pending bets (first pending_count IDs)
+      if (pendingCount > 0 && betIdInts.length >= pendingCount) {
+        List<int> pendingBetIds = betIdInts.sublist(0, pendingCount);
+
+        if (pendingBetIds.isNotEmpty) {
+          final pendingBets = await _supabase
+              .from('pending_bets')
+              .select('*')
+              .inFilter('id', pendingBetIds)
+              .eq('user_id', user.id);
+
+          for (var bet in pendingBets) {
+            bet['source'] = 'pending_bets';
+            allBets.add(bet);
+          }
+        }
+      }
+
+      // Get paid bets (last paid_count IDs)
+      if (paidCount > 0 && betIdInts.length >= pendingCount + paidCount) {
+        List<int> paidBetIds = betIdInts.sublist(
+          pendingCount,
+          pendingCount + paidCount,
+        );
+
+        if (paidBetIds.isNotEmpty) {
+          final paidBets = await _supabase
+              .from('bets')
+              .select('*')
+              .inFilter('id', paidBetIds)
+              .eq('user_id', user.id);
+
+          for (var bet in paidBets) {
+            bet['source'] = 'bets';
+            allBets.add(bet);
+          }
+        }
+      }
+
+      return allBets;
+    } catch (e) {
+      throw Exception('Failed to fetch bets by group summary: $e');
+    }
+  }
+
   /// Update existing bet in bets table
   static Future<Map<String, dynamic>> updateBet({
     required int betId,
@@ -820,6 +993,32 @@ class BetsApi {
       return betMap;
     } catch (e) {
       throw Exception('Failed to fetch bet: $e');
+    }
+  }
+
+  /// Get money limit for a specific time and number type
+  /// Returns the limit_per_number as int, or null if not found
+  static Future<int?> getMoneyLimit({
+    required String time,
+    required String numberType, // '2 លេខ' or '3 លេខ'
+  }) async {
+    try {
+      final response = await _supabase
+          .from('money_limit')
+          .select('limit_per_number')
+          .eq('time', time)
+          .eq('number_type', numberType)
+          .maybeSingle();
+
+      if (response == null) {
+        return null;
+      }
+
+      final limitStr = response['limit_per_number'] as String? ?? '';
+      return int.tryParse(limitStr);
+    } catch (e) {
+      print('Error fetching money limit: $e');
+      return null; // Return null on error (fail open - allow betting)
     }
   }
 }

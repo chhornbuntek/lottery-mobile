@@ -913,6 +913,15 @@ class _BettingScreenState extends State<BettingScreen> {
       _betList.clear();
       _pendingBetIds.clear();
       _totalAmount = 0;
+
+      // If in edit mode, also clear edit mode state and display area
+      if (_isEditMode) {
+        _isEditMode = false;
+        _betsToEdit.clear();
+        _betBeingEdited = null;
+        _editingBetId = null;
+        _currentEditIndex = 0;
+      }
     });
   }
 
@@ -1242,7 +1251,37 @@ class _BettingScreenState extends State<BettingScreen> {
   }
 
   void _showReceiptPreview() {
-    if (_betList.isEmpty) {
+    List<BetData> betsToShow = [];
+    int totalAmountToShow = 0;
+    String? customerName;
+    String? lotteryTime;
+
+    // Check if in edit mode - use _betsToEdit
+    if (_isEditMode && _betsToEdit.isNotEmpty) {
+      // Convert _betsToEdit to BetData objects
+      betsToShow = _betsToEdit.map((betMap) {
+        return BetData.fromMap(betMap);
+      }).toList();
+
+      // Calculate total amount from edited bets
+      totalAmountToShow = betsToShow.fold(
+        0,
+        (sum, bet) => sum + bet.totalAmount,
+      );
+
+      // Get customer name and lottery time from first bet
+      if (betsToShow.isNotEmpty) {
+        customerName = betsToShow.first.customerName;
+        lotteryTime = betsToShow.first.lotteryTime;
+      }
+    } else if (_betList.isNotEmpty) {
+      // Use regular _betList
+      betsToShow = _betList;
+      totalAmountToShow = _totalAmount;
+      final firstBet = _betList.first;
+      customerName = firstBet.customerName;
+      lotteryTime = firstBet.lotteryTime;
+    } else {
       Get.snackbar(
         'កំហុស',
         'មិនមានចាក់បាច់សម្រាប់បង្ហាញវិក័យប័ត្រ',
@@ -1252,14 +1291,22 @@ class _BettingScreenState extends State<BettingScreen> {
       return;
     }
 
-    // Get customer name and lottery time from first bet
-    final firstBet = _betList.first;
+    if (betsToShow.isEmpty || customerName == null || lotteryTime == null) {
+      Get.snackbar(
+        'កំហុស',
+        'មិនមានចាក់បាច់សម្រាប់បង្ហាញវិក័យប័ត្រ',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+      return;
+    }
+
     Get.to(
       () => ReceiptPreview(
-        betList: _betList,
-        totalAmount: _totalAmount,
-        customerName: firstBet.customerName,
-        lotteryTime: firstBet.lotteryTime,
+        betList: betsToShow,
+        totalAmount: totalAmountToShow,
+        customerName: customerName,
+        lotteryTime: lotteryTime,
         billType: _selectedBill,
       ),
     );

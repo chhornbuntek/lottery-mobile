@@ -43,6 +43,21 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
 
   Future<void> _fetchPendingBets() async {
     try {
+      // If betList is provided and not empty, use it directly (especially for edit mode)
+      if (widget.betList.isNotEmpty) {
+        print('Using provided betList with ${widget.betList.length} bets');
+        if (widget.betList.isNotEmpty) {
+          print(
+            'First bet: numbers=${widget.betList.first.betNumbers.join(",")}, invoiceNumber=${widget.betList.first.invoiceNumber}',
+          );
+        }
+        setState(() {
+          _fetchedBetList = widget.betList;
+          _isLoading = false;
+        });
+        return;
+      }
+
       // If customer name and lottery time are provided, use bet_groups_summary
       if (widget.customerName != null &&
           widget.customerName!.isNotEmpty &&
@@ -537,50 +552,6 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
     }
 
     return '$displayHour:$minute $period';
-  }
-
-  String _formatAmountInWords(int amount) {
-    // Simple number to words conversion for Khmer
-    if (amount == 0) return 'សូន្យ';
-
-    List<String> units = [
-      '',
-      'មួយ',
-      'ពីរ',
-      'បី',
-      'បួន',
-      'ប្រាំ',
-      'ប្រាំមួយ',
-      'ប្រាំពីរ',
-      'ប្រាំបី',
-      'ប្រាំបួន',
-    ];
-    List<String> tens = [
-      '',
-      '',
-      'ម្ភៃ',
-      'សាមសិប',
-      'សែសិប',
-      'ហាសិប',
-      'ហុកសិប',
-      'ចិតសិប',
-      'ប៉ែតសិប',
-      'កៅសិប',
-    ];
-
-    if (amount < 10) {
-      return units[amount];
-    } else if (amount < 100) {
-      int ten = amount ~/ 10;
-      int unit = amount % 10;
-      if (unit == 0) {
-        return tens[ten];
-      } else {
-        return '${tens[ten]}${units[unit]}';
-      }
-    } else {
-      return '$amount'; // For larger numbers, just show the number
-    }
   }
 
   Future<void> _saveReceiptToPhone() async {

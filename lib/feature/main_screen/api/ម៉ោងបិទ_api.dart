@@ -6,6 +6,7 @@ class ClosingTimeApi {
   /// Get all closing times with their posts
   static Future<List<Map<String, dynamic>>> getAllClosingTimes() async {
     try {
+      print('🔄 ClosingTimeApi: Fetching closing times from database...');
       final response = await _supabase
           .from('closing_time')
           .select('''
@@ -25,8 +26,18 @@ class ClosingTimeApi {
           ''')
           .order('id');
 
+      print(
+        '✅ ClosingTimeApi: Successfully fetched ${response.length} closing times from database',
+      );
+      if (response.isNotEmpty) {
+        print(
+          '📋 Sample closing time: ${response.first['time_name']}, Posts: ${(response.first['closing_time_posts'] as List?)?.length ?? 0}',
+        );
+      }
+
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
+      print('❌ ClosingTimeApi Error: $e');
       throw Exception('Failed to fetch closing times: $e');
     }
   }

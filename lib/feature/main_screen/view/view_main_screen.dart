@@ -71,41 +71,41 @@ class MainScreen extends StatelessWidget {
           // Debug: Print error if image fails to load
           debugPrint('Error loading logo: $error');
           // Fallback if image fails to load
-          return Container(
-            color: Colors.black,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.edit, color: Colors.grey, size: 40),
-                const SizedBox(height: 10),
-                const Text(
-                  'ទទួល',
-                  style: TextStyle(
-                    color: Colors.grey,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const Text(
-                  'កត់ឆ្នោត',
-                  style: TextStyle(
-                    color: Colors.grey,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 5),
-                const Text(
-                  'LOTTERY-GROUP',
-                  style: TextStyle(
-                    color: Colors.grey,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
+    return Container(
+        color: Colors.black,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.edit, color: Colors.grey, size: 40),
+          const SizedBox(height: 10),
+          const Text(
+            'ទទួល',
+            style: TextStyle(
+              color: Colors.grey,
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
             ),
-          );
+          ),
+          const Text(
+            'កត់ឆ្នោត',
+            style: TextStyle(
+              color: Colors.grey,
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 5),
+          const Text(
+            'LOTTERY-GROUP',
+            style: TextStyle(
+              color: Colors.grey,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
         },
       ),
     );

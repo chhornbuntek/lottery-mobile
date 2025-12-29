@@ -741,15 +741,43 @@ class _BettingScreenState extends State<BettingScreen> {
           numberType: numberType,
         );
 
-        if (moneyLimit != null && amountPerNumber > moneyLimit) {
-          Get.snackbar(
-            'កំហុស',
-            'ចំនួនប្រាក់លើសពីកម្រិត! កម្រិតសម្រាប់ $numberType គឺ: ${moneyLimit.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛',
-            backgroundColor: Colors.red,
-            colorText: Colors.white,
-            duration: const Duration(seconds: 4),
+        if (moneyLimit != null) {
+          // Get all existing bets for the same lottery time and date
+          final existingBets = await BetsApi.getAllBetsByDate(
+            date: DateTime.now(),
+            billType: _selectedBill,
+            lotteryTime: _selectedLotteryTime!.timeName,
           );
-          return;
+
+          // Calculate total amount per number across all existing bets
+          Map<String, int> totalAmountPerNumber = {};
+          for (var bet in existingBets) {
+            final betNumbers = bet['bet_numbers'] as List<dynamic>? ?? [];
+            final betAmountPerNumber = bet['amount_per_number'] as int? ?? 0;
+
+            for (var number in betNumbers) {
+              final numberStr = number.toString();
+              totalAmountPerNumber[numberStr] =
+                  (totalAmountPerNumber[numberStr] ?? 0) + betAmountPerNumber;
+            }
+          }
+
+          // Check each number in the new bet
+          for (var number in _expandedNumbers) {
+            final existingTotal = totalAmountPerNumber[number] ?? 0;
+            final newTotal = existingTotal + amountPerNumber;
+
+            if (newTotal > moneyLimit) {
+              Get.snackbar(
+                'កំហុស',
+                'លេខ $number: ចំនួនប្រាក់លើសពីកម្រិត! សរុបបច្ចុប្បន្ន: ${existingTotal.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛ + ${amountPerNumber.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛ = ${newTotal.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛ > ${moneyLimit.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛',
+                backgroundColor: Colors.red,
+                colorText: Colors.white,
+                duration: const Duration(seconds: 5),
+              );
+              return;
+            }
+          }
         }
       } catch (e) {
         // If error fetching limit, allow betting (fail open)
@@ -2748,20 +2776,53 @@ class _BettingScreenState extends State<BettingScreen> {
             numberType: numberTypeForLimit,
           );
 
-          if (moneyLimit != null && amountPerNumber > moneyLimit) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  'ចំនួនប្រាក់លើសពីកម្រិត! កម្រិតសម្រាប់ $numberTypeForLimit គឺ: ${moneyLimit.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛',
-                ),
-                backgroundColor: Colors.red,
-                duration: const Duration(seconds: 4),
-              ),
+          if (moneyLimit != null) {
+            // Get all existing bets for the same lottery time and date
+            final existingBets = await BetsApi.getAllBetsByDate(
+              date: DateTime.now(),
+              billType: _selectedBill,
+              lotteryTime: _selectedLotteryTime!.timeName,
             );
-            setState(() {
-              _isSaving = false;
-            });
-            return;
+
+            // Calculate total amount per number across all existing bets
+            // Exclude the current bet being edited
+            Map<String, int> totalAmountPerNumber = {};
+            for (var bet in existingBets) {
+              final betId = bet['id'] as int?;
+              // Skip the current bet being edited
+              if (betId == _editingBetId) continue;
+
+              final betNumbers = bet['bet_numbers'] as List<dynamic>? ?? [];
+              final betAmountPerNumber = bet['amount_per_number'] as int? ?? 0;
+
+              for (var number in betNumbers) {
+                final numberStr = number.toString();
+                totalAmountPerNumber[numberStr] =
+                    (totalAmountPerNumber[numberStr] ?? 0) + betAmountPerNumber;
+              }
+            }
+
+            // Check each number in the edited bet
+            for (var number in expandedBetNumbers) {
+              final existingTotal = totalAmountPerNumber[number] ?? 0;
+              final newTotal = existingTotal + amountPerNumber;
+
+              if (newTotal > moneyLimit) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'លេខ $number: ចំនួនប្រាក់លើសពីកម្រិត! សរុបបច្ចុប្បន្ន: ${existingTotal.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛ + ${amountPerNumber.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛ = ${newTotal.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛ > ${moneyLimit.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛',
+                    ),
+                    backgroundColor: Colors.red,
+                    duration: const Duration(seconds: 5),
+                  ),
+                );
+                setState(() {
+                  _isSaving = false;
+                });
+                return;
+              }
+            }
           }
         } catch (e) {
           // If error fetching limit, allow betting (fail open)
@@ -3191,15 +3252,43 @@ class _BettingScreenState extends State<BettingScreen> {
           numberType: numberType,
         );
 
-        if (moneyLimit != null && amountPerNumber > moneyLimit) {
-          Get.snackbar(
-            'កំហុស',
-            'ចំនួនប្រាក់លើសពីកម្រិត! កម្រិតសម្រាប់ $numberType គឺ: ${moneyLimit.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛',
-            backgroundColor: Colors.red,
-            colorText: Colors.white,
-            duration: const Duration(seconds: 4),
+        if (moneyLimit != null) {
+          // Get all existing bets for the same lottery time and date
+          final existingBets = await BetsApi.getAllBetsByDate(
+            date: DateTime.now(),
+            billType: _selectedBill,
+            lotteryTime: groupLotteryTime,
           );
-          return;
+
+          // Calculate total amount per number across all existing bets
+          Map<String, int> totalAmountPerNumber = {};
+          for (var bet in existingBets) {
+            final betNumbers = bet['bet_numbers'] as List<dynamic>? ?? [];
+            final betAmountPerNumber = bet['amount_per_number'] as int? ?? 0;
+
+            for (var number in betNumbers) {
+              final numberStr = number.toString();
+              totalAmountPerNumber[numberStr] =
+                  (totalAmountPerNumber[numberStr] ?? 0) + betAmountPerNumber;
+            }
+          }
+
+          // Check each number in the new bet
+          for (var number in _expandedNumbers) {
+            final existingTotal = totalAmountPerNumber[number] ?? 0;
+            final newTotal = existingTotal + amountPerNumber;
+
+            if (newTotal > moneyLimit) {
+              Get.snackbar(
+                'កំហុស',
+                'លេខ $number: ចំនួនប្រាក់លើសពីកម្រិត! សរុបបច្ចុប្បន្ន: ${existingTotal.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛ + ${amountPerNumber.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛ = ${newTotal.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛ > ${moneyLimit.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛',
+                backgroundColor: Colors.red,
+                colorText: Colors.white,
+                duration: const Duration(seconds: 5),
+              );
+              return;
+            }
+          }
         }
       } catch (e) {
         print('Error checking money limit: $e');

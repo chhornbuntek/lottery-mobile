@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../service/ម៉ោងបិទ_service.dart';
 
+// Import ClosingTimePost for type safety
+
 class ClosingTimeScreen extends StatefulWidget {
   const ClosingTimeScreen({super.key});
 
@@ -27,13 +29,26 @@ class _ClosingTimeScreenState extends State<ClosingTimeScreen> {
         _error = null;
       });
 
+      print('🔄 Loading closing times from database...');
       final closingTimes = await ClosingTimeService.getAllClosingTimes();
+      print('✅ Loaded ${closingTimes.length} closing times from database');
+
+      // Debug: Print details of each closing time
+      for (var ct in closingTimes) {
+        print('📋 Closing Time: ${ct.timeName}, Posts: ${ct.posts.length}');
+        for (var post in ct.posts) {
+          print(
+            '  - Post ${post.postId}: Mon=${post.monday}, Tue=${post.tuesday}, Wed=${post.wednesday}',
+          );
+        }
+      }
 
       setState(() {
         _closingTimes = closingTimes;
         _isLoading = false;
       });
     } catch (e) {
+      print('❌ Error loading closing times: $e');
       setState(() {
         _error = e.toString();
         _isLoading = false;
@@ -113,20 +128,24 @@ class _ClosingTimeScreenState extends State<ClosingTimeScreen> {
       );
     }
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: _closingTimes.map((closingTime) {
-          return Column(
-            children: [
-              _buildScheduleSection(
-                closingTime.timeName,
-                _buildScheduleRows(closingTime),
-              ),
-              const SizedBox(height: 20),
-            ],
-          );
-        }).toList(),
+    return RefreshIndicator(
+      onRefresh: _loadClosingTimes,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: _closingTimes.map((closingTime) {
+            return Column(
+              children: [
+                _buildScheduleSection(
+                  closingTime.timeName,
+                  _buildScheduleRows(closingTime),
+                ),
+                const SizedBox(height: 20),
+              ],
+            );
+          }).toList(),
+        ),
       ),
     );
   }
@@ -139,15 +158,37 @@ class _ClosingTimeScreenState extends State<ClosingTimeScreen> {
     return closingTime.posts.map((post) {
       return _buildScheduleRow(
         post.postId,
-        _convertToCambodiaTime(closingTime.getTimeForDay('monday')),
-        _convertToCambodiaTime(closingTime.getTimeForDay('tuesday')),
-        _convertToCambodiaTime(closingTime.getTimeForDay('wednesday')),
-        _convertToCambodiaTime(closingTime.getTimeForDay('thursday')),
-        _convertToCambodiaTime(closingTime.getTimeForDay('friday')),
-        _convertToCambodiaTime(closingTime.getTimeForDay('saturday')),
-        _convertToCambodiaTime(closingTime.getTimeForDay('sunday')),
+        _convertToCambodiaTime(_getPostTimeForDay(post, 'monday')),
+        _convertToCambodiaTime(_getPostTimeForDay(post, 'tuesday')),
+        _convertToCambodiaTime(_getPostTimeForDay(post, 'wednesday')),
+        _convertToCambodiaTime(_getPostTimeForDay(post, 'thursday')),
+        _convertToCambodiaTime(_getPostTimeForDay(post, 'friday')),
+        _convertToCambodiaTime(_getPostTimeForDay(post, 'saturday')),
+        _convertToCambodiaTime(_getPostTimeForDay(post, 'sunday')),
       );
     }).toList();
+  }
+
+  /// Get time for a specific day from a post
+  String? _getPostTimeForDay(ClosingTimePost post, String dayOfWeek) {
+    switch (dayOfWeek.toLowerCase()) {
+      case 'monday':
+        return post.monday;
+      case 'tuesday':
+        return post.tuesday;
+      case 'wednesday':
+        return post.wednesday;
+      case 'thursday':
+        return post.thursday;
+      case 'friday':
+        return post.friday;
+      case 'saturday':
+        return post.saturday;
+      case 'sunday':
+        return post.sunday;
+      default:
+        return null;
+    }
   }
 
   /// Convert international time to Cambodia time with AM/PM format

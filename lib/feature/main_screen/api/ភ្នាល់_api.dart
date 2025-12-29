@@ -269,6 +269,20 @@ class BetsApi {
         throw Exception('No pending bets found');
       }
 
+      // Collect unique dates for recalculation
+      final affectedDates = <String>{};
+      for (var bet in pendingBets) {
+        final betDate = bet['bet_date'];
+        if (betDate != null) {
+          // Handle both string and DateTime types
+          if (betDate is DateTime) {
+            affectedDates.add(betDate.toIso8601String().split('T')[0]);
+          } else {
+            affectedDates.add(betDate.toString());
+          }
+        }
+      }
+
       // Prepare data for bets table (remove fields that don't exist in bets table)
       final betsData = pendingBets.map((bet) {
         final betMap = Map<String, dynamic>.from(bet);
@@ -295,6 +309,17 @@ class BetsApi {
           .delete()
           .inFilter('id', pendingBetIds)
           .eq('user_id', user.id);
+
+      // Recalculate totals for affected dates
+      for (var dateStr in affectedDates) {
+        try {
+          final date = DateTime.parse(dateStr);
+          await _recalculateTotalsForDate(user.id, date);
+        } catch (e) {
+          print('Error recalculating totals for date $dateStr: $e');
+          // Continue with other dates even if one fails
+        }
+      }
 
       return List<Map<String, dynamic>>.from(insertedBets);
     } catch (e) {
@@ -323,6 +348,20 @@ class BetsApi {
         throw Exception('No bets found');
       }
 
+      // Collect unique dates for recalculation
+      final affectedDates = <String>{};
+      for (var bet in bets) {
+        final betDate = bet['bet_date'];
+        if (betDate != null) {
+          // Handle both string and DateTime types
+          if (betDate is DateTime) {
+            affectedDates.add(betDate.toIso8601String().split('T')[0]);
+          } else {
+            affectedDates.add(betDate.toString());
+          }
+        }
+      }
+
       // Prepare data for pending_bets table (remove fields that don't exist in pending_bets table)
       final pendingBetsData = bets.map((bet) {
         final betMap = Map<String, dynamic>.from(bet);
@@ -349,9 +388,92 @@ class BetsApi {
           .inFilter('id', betIds)
           .eq('user_id', user.id);
 
+      // Recalculate totals for affected dates
+      for (var dateStr in affectedDates) {
+        try {
+          final date = DateTime.parse(dateStr);
+          await _recalculateTotalsForDate(user.id, date);
+        } catch (e) {
+          print('Error recalculating totals for date $dateStr: $e');
+          // Continue with other dates even if one fails
+        }
+      }
+
       return List<Map<String, dynamic>>.from(insertedPendingBets);
     } catch (e) {
       throw Exception('Failed to move bets to pending bets: $e');
+    }
+  }
+
+  /// Helper method to recalculate totals for a specific date
+  static Future<void> _recalculateTotalsForDate(
+    String userId,
+    DateTime date,
+  ) async {
+    try {
+      final dateStr = date.toIso8601String().split('T')[0];
+
+      // Delete existing totals for the date
+      await _supabase
+          .from('lottery_time_totals')
+          .delete()
+          .eq('user_id', userId)
+          .eq('date', dateStr);
+
+      // Get all bets for the date and recalculate
+      final betsResponse = await _supabase
+          .from('bets')
+          .select('lottery_time_id, lottery_time, total_amount')
+          .eq('user_id', userId)
+          .eq('bet_date', dateStr);
+
+      // Group by lottery_time_id and calculate totals
+      final totalsMap = <int, Map<String, dynamic>>{};
+      for (var bet in betsResponse) {
+        final lotteryTimeId = bet['lottery_time_id'] as int?;
+        if (lotteryTimeId == null) continue;
+
+        final lotteryTimeName = bet['lottery_time'] as String? ?? '';
+        final amount = (bet['total_amount'] as int?) ?? 0;
+
+        if (!totalsMap.containsKey(lotteryTimeId)) {
+          totalsMap[lotteryTimeId] = {
+            'lottery_time_name': lotteryTimeName,
+            'total_amount': 0,
+            'bet_count': 0,
+          };
+        }
+
+        totalsMap[lotteryTimeId]!['total_amount'] =
+            (totalsMap[lotteryTimeId]!['total_amount'] as int) + amount;
+        totalsMap[lotteryTimeId]!['bet_count'] =
+            (totalsMap[lotteryTimeId]!['bet_count'] as int) + 1;
+      }
+
+      // Get user's admin_id from profile
+      final profileResponse = await _supabase
+          .from('profile')
+          .select('admin_id')
+          .eq('id', userId)
+          .maybeSingle();
+
+      final adminId = profileResponse?['admin_id'] as String?;
+
+      // Insert recalculated totals
+      for (var entry in totalsMap.entries) {
+        await _supabase.from('lottery_time_totals').insert({
+          'user_id': userId,
+          'date': dateStr,
+          'lottery_time_id': entry.key,
+          'lottery_time_name': entry.value['lottery_time_name'],
+          'total_amount': entry.value['total_amount'],
+          'bet_count': entry.value['bet_count'],
+          'admin_id': adminId,
+        });
+      }
+    } catch (e) {
+      print('Error in _recalculateTotalsForDate: $e');
+      rethrow;
     }
   }
 

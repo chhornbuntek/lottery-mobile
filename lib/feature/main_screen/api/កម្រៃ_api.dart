@@ -173,4 +173,180 @@ class CommissionsApi {
       throw Exception('Failed to delete commission: $e');
     }
   }
+
+  /// Get commission data with summary and time slots
+  static Future<List<Map<String, dynamic>>> getCommissionDataWithTimeSlots({
+    required DateTime date,
+  }) async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) {
+        throw Exception('User not authenticated');
+      }
+
+      final dateStr = date.toIso8601String().split('T')[0];
+
+      // Since Supabase doesn't support direct SQL execution, we'll break it down into multiple queries
+      // Get agent data with lottery times
+      final betsResponse = await _supabase
+          .from('bets')
+          .select('''
+            id,
+            lottery_time,
+            total_amount,
+            customer_name,
+            lottery_time_id,
+            lottery_times(sort_order)
+          ''')
+          .eq('user_id', user.id)
+          .eq('bet_date', dateStr);
+
+      // Get win data
+      final betResultsResponse = await _supabase
+          .from('bet_results')
+          .select('''
+            bet_id,
+            win_amount,
+            date,
+            bets!inner(lottery_time, user_id)
+          ''')
+          .eq('date', dateStr);
+
+      // Get commission data
+      final commissionResponse = await _supabase
+          .from('commissions')
+          .select('total_commission_amount, total_win_amount')
+          .eq('user_id', user.id)
+          .eq('date', dateStr)
+          .maybeSingle();
+
+      // Helper function to safely convert to int
+      int _toInt(dynamic value) {
+        if (value == null) return 0;
+        if (value is int) return value;
+        if (value is double) return value.toInt();
+        if (value is String) return int.tryParse(value) ?? 0;
+        return 0;
+      }
+
+      // Process the data
+      final List<Map<String, dynamic>> result = [];
+
+      // Calculate summary
+      int totalBets = 0;
+      int customerBets = 0;
+      int agentBets = 0;
+      Map<String, Map<String, dynamic>> timeSlotData = {};
+
+      for (var bet in betsResponse) {
+        final totalAmount = _toInt(bet['total_amount']);
+        final customerName = bet['customer_name'] as String? ?? '';
+        final lotteryTime = bet['lottery_time'] as String? ?? '';
+        final lotteryTimes = bet['lottery_times'];
+        int sortOrder = 0;
+        if (lotteryTimes != null) {
+          if (lotteryTimes is List && lotteryTimes.isNotEmpty) {
+            final firstItem = lotteryTimes[0] as Map<String, dynamic>?;
+            sortOrder = _toInt(firstItem?['sort_order']);
+          } else if (lotteryTimes is Map<String, dynamic>) {
+            sortOrder = _toInt(lotteryTimes['sort_order']);
+          }
+        }
+
+        totalBets += totalAmount;
+
+        if (customerName.isEmpty) {
+          agentBets += totalAmount;
+        } else {
+          customerBets += totalAmount;
+        }
+
+        // Group by lottery time
+        if (lotteryTime.isNotEmpty) {
+          if (!timeSlotData.containsKey(lotteryTime)) {
+            timeSlotData[lotteryTime] = {
+              'lottery_time': lotteryTime,
+              'sort_order': sortOrder,
+              'total_bets': 0,
+              'customer_bets': 0,
+              'agent_bets': 0,
+              'total_payout': 0,
+            };
+          }
+          timeSlotData[lotteryTime]!['total_bets'] =
+              _toInt(timeSlotData[lotteryTime]!['total_bets']) + totalAmount;
+          if (customerName.isEmpty) {
+            timeSlotData[lotteryTime]!['agent_bets'] =
+                _toInt(timeSlotData[lotteryTime]!['agent_bets']) + totalAmount;
+          } else {
+            timeSlotData[lotteryTime]!['customer_bets'] =
+                _toInt(timeSlotData[lotteryTime]!['customer_bets']) +
+                totalAmount;
+          }
+        }
+      }
+
+      // Add win amounts
+      for (var result in betResultsResponse) {
+        final bet = result['bets'] as Map<String, dynamic>?;
+        if (bet != null) {
+          final lotteryTime = bet['lottery_time'] as String? ?? '';
+          final winAmount = _toInt(result['win_amount']);
+          if (lotteryTime.isNotEmpty && timeSlotData.containsKey(lotteryTime)) {
+            timeSlotData[lotteryTime]!['total_payout'] =
+                _toInt(timeSlotData[lotteryTime]!['total_payout']) + winAmount;
+          }
+        }
+      }
+
+      // Calculate win/loss for time slots
+      for (var key in timeSlotData.keys) {
+        final data = timeSlotData[key]!;
+        data['win_loss'] =
+            _toInt(data['total_bets']) - _toInt(data['total_payout']);
+      }
+
+      // Add summary
+      final bonus = _toInt(commissionResponse?['total_commission_amount']);
+      final totalPayout = _toInt(commissionResponse?['total_win_amount']);
+      final winLoss = totalBets - totalPayout;
+
+      result.add({
+        'type': 'summary',
+        'lottery_time': null,
+        'sort_order': null,
+        'bonus': bonus,
+        'total_bets': totalBets,
+        'customer_bets': customerBets,
+        'agent_bets': agentBets,
+        'total_payout': totalPayout,
+        'win_loss': winLoss,
+      });
+
+      // Add time slots
+      final timeSlotList = timeSlotData.values.toList();
+      timeSlotList.sort(
+        (a, b) => _toInt(a['sort_order']).compareTo(_toInt(b['sort_order'])),
+      );
+
+      for (var slot in timeSlotList) {
+        result.add({
+          'type': 'timeslot',
+          'lottery_time': slot['lottery_time'],
+          'sort_order': slot['sort_order'],
+          'bonus': 0,
+          'total_bets': slot['total_bets'],
+          'customer_bets': slot['customer_bets'],
+          'agent_bets': slot['agent_bets'],
+          'total_payout': slot['total_payout'],
+          'win_loss': slot['win_loss'],
+        });
+      }
+
+      return result;
+    } catch (e) {
+      print('Error fetching commission data with time slots: $e');
+      throw Exception('Failed to fetch commission data: $e');
+    }
+  }
 }

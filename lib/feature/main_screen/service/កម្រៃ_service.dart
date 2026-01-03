@@ -217,4 +217,60 @@ class CommissionsService {
       throw Exception('Failed to get commission stats: $e');
     }
   }
+
+  /// Get commission data with summary and time slots
+  static Future<List<CommissionTimeSlotData>> getCommissionDataWithTimeSlots({
+    required DateTime date,
+  }) async {
+    try {
+      final data = await CommissionsApi.getCommissionDataWithTimeSlots(
+        date: date,
+      );
+      return data.map((item) => CommissionTimeSlotData.fromMap(item)).toList();
+    } catch (e) {
+      print('Error fetching commission data with time slots: $e');
+      throw Exception('Failed to get commission data: $e');
+    }
+  }
+}
+
+class CommissionTimeSlotData {
+  final String type; // 'summary' or 'timeslot'
+  final String? lotteryTime;
+  final int? sortOrder;
+  final int bonus;
+  final int totalBets;
+  final int customerBets;
+  final int agentBets;
+  final int totalPayout;
+  final int winLoss;
+
+  CommissionTimeSlotData({
+    required this.type,
+    this.lotteryTime,
+    this.sortOrder,
+    required this.bonus,
+    required this.totalBets,
+    required this.customerBets,
+    required this.agentBets,
+    required this.totalPayout,
+    required this.winLoss,
+  });
+
+  factory CommissionTimeSlotData.fromMap(Map<String, dynamic> map) {
+    return CommissionTimeSlotData(
+      type: map['type'] ?? '',
+      lotteryTime: map['lottery_time'],
+      sortOrder: map['sort_order'],
+      bonus: map['bonus'] ?? 0,
+      totalBets: map['total_bets'] ?? 0,
+      customerBets: map['customer_bets'] ?? 0,
+      agentBets: map['agent_bets'] ?? 0,
+      totalPayout: map['total_payout'] ?? 0,
+      winLoss: map['win_loss'] ?? 0,
+    );
+  }
+
+  bool get isSummary => type == 'summary';
+  bool get isTimeSlot => type == 'timeslot';
 }

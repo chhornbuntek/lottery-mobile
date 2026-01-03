@@ -586,34 +586,46 @@ class _BettingScreenState extends State<BettingScreen> {
               int daySpecificMinute = int.tryParse(timeParts[1]) ?? 0;
               int daySpecificMinutes = daySpecificHour * 60 + daySpecificMinute;
 
+              // Debug logging
+              print(
+                '🔍 Checking post $condition: currentTime=${currentTime.hour}:${currentTime.minute} (${currentMinutes}min), closingTime=$daySpecificTimeStr (${daySpecificMinutes}min), endTime=${closingTime.endTime} (${endMinutes}min)',
+              );
+
               // Check if current time is before day-specific start time (too early to bet)
-              // Use day-specific time from closing_time_posts as the start time for this post
+              // Use day-specific time from closing_time_posts as the closing time for this post
               bool isBeforeStart = false;
               if (endMinutes < daySpecificMinutes) {
-                // End time is on next day (e.g., 06:30 < 10:30)
-                // Betting window: day-specific time (e.g., 10:30) to end_time (next day 06:30)
-                // Too early if current time < day-specific time AND current time > end time
-                isBeforeStart =
-                    currentMinutes < daySpecificMinutes &&
-                    currentMinutes > endMinutes;
+                // End time is on next day (e.g., 05:00 < 17:20)
+                // Betting window: end_time (05:00) to day-specific closing time (17:20)
+                // Too early if current time <= end time (before betting window starts)
+                // OR if current time >= day-specific closing time (after betting window ends)
+                // Actually, we should only check "too early" - which is before the betting window starts
+                // The betting window is from end_time (05:00) to day-specific closing time (17:20)
+                isBeforeStart = currentMinutes <= endMinutes;
               } else {
-                // End time is on same day
-                // Too early if current time < day-specific start time
-                isBeforeStart = currentMinutes < daySpecificMinutes;
+                // End time is on same day (e.g., 18:00 > 17:20)
+                // Betting window: 00:00 to day-specific closing time (17:20)
+                // Too early if current time < day-specific closing time (but this doesn't make sense)
+                // Actually, if end_time is on same day and > day-specific, the logic is different
+                // For now, assume betting is allowed from 00:00 to day-specific closing time
+                isBeforeStart =
+                    false; // No "too early" restriction when end_time is on same day
               }
 
               // Check if current time is after day-specific closing time
-              // Post closes at the day-specific time (e.g., monday = 10:30 for this post)
+              // Post closes at the day-specific time (e.g., monday = 17:20 for this post)
               // After closing time, betting is blocked until end_time from closing_time table
               bool isAfterClosing = false;
               if (endMinutes < daySpecificMinutes) {
-                // End time is on next day (e.g., 06:30 < 10:30)
-                // Post is closed if current time >= day-specific closing time OR current time <= end time
-                isAfterClosing =
-                    currentMinutes >= daySpecificMinutes ||
-                    currentMinutes <= endMinutes;
+                // End time is on next day (e.g., 05:00 < 17:20)
+                // Betting window: end_time (05:00) to day-specific closing time (17:20)
+                // Post is closed if current time >= day-specific closing time
+                // OR if current time <= end time (before betting window starts)
+                // But we already handle "before start" above, so here we only check "after closing"
+                isAfterClosing = currentMinutes >= daySpecificMinutes;
               } else {
-                // End time is on same day
+                // End time is on same day (e.g., 18:00 > 17:20)
+                // Betting window: 00:00 to day-specific closing time (17:20)
                 // Post is closed if current time >= day-specific closing time AND current time <= end time
                 isAfterClosing =
                     currentMinutes >= daySpecificMinutes &&
@@ -624,7 +636,12 @@ class _BettingScreenState extends State<BettingScreen> {
               // 1. Too early (before day-specific start time from closing_time_posts)
               // 2. After closing time (after day-specific closing time from closing_time_posts)
               if (isBeforeStart || isAfterClosing) {
+                print(
+                  '❌ Post $condition is CLOSED: isBeforeStart=$isBeforeStart, isAfterClosing=$isAfterClosing',
+                );
                 closedPosts.add(condition);
+              } else {
+                print('✅ Post $condition is OPEN');
               }
             }
           }
@@ -3843,6 +3860,49 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
     return betIds;
   }
 
+  /// Extract time from lottery time name (e.g., "យួន 2:30PM" -> 14:30 in minutes)
+  int? _extractTimeFromLotteryTimeName(String lotteryTimeName) {
+    try {
+      // Try to extract time pattern like "2:30PM", "10:30AM", "6:30PM", etc.
+      // Pattern: digits:digitsAM/PM or digits:digits AM/PM
+      final timePattern = RegExp(
+        r'(\d{1,2}):(\d{2})\s*(AM|PM)',
+        caseSensitive: false,
+      );
+      final match = timePattern.firstMatch(lotteryTimeName);
+
+      if (match != null) {
+        final hour = int.tryParse(match.group(1) ?? '') ?? 0;
+        final minute = int.tryParse(match.group(2) ?? '') ?? 0;
+        final period = (match.group(3) ?? '').toUpperCase();
+
+        int hour24 = hour;
+        if (period == 'PM' && hour != 12) {
+          hour24 = hour + 12;
+        } else if (period == 'AM' && hour == 12) {
+          hour24 = 0;
+        }
+
+        return hour24 * 60 + minute;
+      }
+
+      // If no AM/PM pattern found, try 24-hour format (e.g., "14:30")
+      final timePattern24 = RegExp(r'(\d{1,2}):(\d{2})');
+      final match24 = timePattern24.firstMatch(lotteryTimeName);
+
+      if (match24 != null) {
+        final hour = int.tryParse(match24.group(1) ?? '') ?? 0;
+        final minute = int.tryParse(match24.group(2) ?? '') ?? 0;
+        return hour * 60 + minute;
+      }
+
+      return null;
+    } catch (e) {
+      print('Error extracting time from lottery time name: $e');
+      return null;
+    }
+  }
+
   /// Cancel payment for selected groups (move bets back to pending_bets)
   Future<void> _cancelPayment() async {
     final selectedBetIds = _getSelectedPaidBetIds();
@@ -3855,6 +3915,108 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
         ),
       );
       return;
+    }
+
+    // Check if any selected bets are past their lottery time
+    try {
+      final groupedBets = _groupBetsByCustomerTime();
+      final Set<String> lotteryTimesToCheck = {};
+
+      // Collect unique lottery times from selected groups
+      for (var selectedKey in _selectedGroups) {
+        final groupBets = groupedBets[selectedKey] ?? [];
+        for (var bet in groupBets) {
+          final source = bet['source'] as String? ?? '';
+          if (source == 'bets') {
+            final lotteryTime = bet['lottery_time'] as String? ?? '';
+            if (lotteryTime.isNotEmpty) {
+              lotteryTimesToCheck.add(lotteryTime);
+            }
+          }
+        }
+      }
+
+      // Get current time
+      final DateTime now = DateTime.now();
+      final TimeOfDay currentTime = TimeOfDay.fromDateTime(now);
+      final int currentMinutes = currentTime.hour * 60 + currentTime.minute;
+
+      // Check each lottery time
+      List<String> pastLotteryTimes = [];
+      for (var lotteryTimeName in lotteryTimesToCheck) {
+        // First, try to extract time directly from lottery time name
+        final lotteryTimeMinutes = _extractTimeFromLotteryTimeName(
+          lotteryTimeName,
+        );
+
+        if (lotteryTimeMinutes != null) {
+          // Simple check: if lottery time < current time, it has passed
+          if (lotteryTimeMinutes < currentMinutes) {
+            pastLotteryTimes.add(lotteryTimeName);
+            continue;
+          }
+        }
+
+        // Fallback: check against closing_time table if time extraction failed
+        final closingTimes = await ClosingTimeService.getAllClosingTimes();
+        final closingTime = closingTimes.firstWhere(
+          (ct) => ct.timeName == lotteryTimeName,
+          orElse: () => ClosingTime(
+            id: 0,
+            timeName: '',
+            startTime: '',
+            endTime: '',
+            vipEnabled: false,
+            posts: [],
+          ),
+        );
+
+        if (closingTime.id != 0 && closingTime.endTime.isNotEmpty) {
+          // Parse end_time (format: HH:MM:SS or HH:MM)
+          final endTimeParts = closingTime.endTime.split(':');
+          if (endTimeParts.length >= 2) {
+            final endHour = int.tryParse(endTimeParts[0]) ?? 0;
+            final endMinute = int.tryParse(endTimeParts[1]) ?? 0;
+            final endMinutes = endHour * 60 + endMinute;
+
+            // Check if current time is past the closing time
+            bool isPastClosing = false;
+
+            if (endMinutes < 12 * 60) {
+              // End time is early morning (before noon, e.g., 05:00)
+              if (currentMinutes < 12 * 60) {
+                isPastClosing = currentMinutes >= endMinutes;
+              } else {
+                isPastClosing = false;
+              }
+            } else {
+              // End time is later in the day (e.g., 16:30)
+              isPastClosing = currentMinutes >= endMinutes;
+            }
+
+            if (isPastClosing) {
+              pastLotteryTimes.add(lotteryTimeName);
+            }
+          }
+        }
+      }
+
+      // If any bets are past their lottery time, prevent cancellation
+      if (pastLotteryTimes.isNotEmpty) {
+        final lotteryTimesStr = pastLotteryTimes.join(', ');
+        Get.snackbar(
+          'កំហុស',
+          'មិនអាចបោះបង់បង់ប្រាក់បាន - ម៉ោងឆ្នោតហើយសម្រាប់: $lotteryTimesStr',
+          backgroundColor: Colors.red,
+          colorText: Colors.white,
+          duration: const Duration(seconds: 4),
+          snackPosition: SnackPosition.TOP,
+        );
+        return;
+      }
+    } catch (e) {
+      print('Error checking lottery times: $e');
+      // Continue with cancellation if check fails (fail open)
     }
 
     setState(() {

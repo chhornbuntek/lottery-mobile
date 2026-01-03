@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../service/កម្រៃ_service.dart';
 
 class CommissionScreen extends StatefulWidget {
@@ -15,11 +16,63 @@ class _CommissionScreenState extends State<CommissionScreen> {
   CommissionSummary? _commissionSummary;
   bool _isLoading = true;
   String _errorMessage = '';
+  String _userName = 'User';
+  List<CommissionTimeSlotData> _commissionData = [];
 
   @override
   void initState() {
     super.initState();
+    _loadUserName();
     _loadCommissionData();
+  }
+
+  Future<void> _loadUserName() async {
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user != null) {
+        // Try to get from profile table first
+        try {
+          final profile = await Supabase.instance.client
+              .from('profile')
+              .select('full_name')
+              .eq('id', user.id)
+              .single();
+
+          if (profile['full_name'] != null) {
+            setState(() {
+              _userName = profile['full_name'];
+            });
+            return;
+          }
+        } catch (e) {
+          print('Error fetching profile: $e');
+        }
+
+        // Fallback to user metadata
+        if (user.userMetadata != null &&
+            user.userMetadata!['full_name'] != null) {
+          setState(() {
+            _userName = user.userMetadata!['full_name'];
+          });
+          return;
+        }
+        if (user.userMetadata != null && user.userMetadata!['name'] != null) {
+          setState(() {
+            _userName = user.userMetadata!['name'];
+          });
+          return;
+        }
+        // Fallback to email
+        if (user.email != null && user.email!.isNotEmpty) {
+          setState(() {
+            _userName = user.email!;
+          });
+          return;
+        }
+      }
+    } catch (e) {
+      print('Error loading user name: $e');
+    }
   }
 
   Future<void> _loadCommissionData() async {
@@ -29,18 +82,21 @@ class _CommissionScreenState extends State<CommissionScreen> {
     });
 
     try {
-      // Load commission for selected date
+      // Load commission data with time slots
+      final commissionData =
+          await CommissionsService.getCommissionDataWithTimeSlots(
+            date: _selectedDate,
+          );
+
+      // Also load old data for backward compatibility
       final selectedDateStr = _selectedDate.toIso8601String().split('T')[0];
       final todayStr = DateTime.now().toIso8601String().split('T')[0];
 
       CommissionData? selectedDateCommission;
 
       if (selectedDateStr == todayStr) {
-        // If selected date is today, use getTodayCommission
         selectedDateCommission = await CommissionsService.getTodayCommission();
       } else {
-        // For other dates, we need to implement a method to get commission by date
-        // For now, we'll get all commissions and filter
         final allCommissions = await CommissionsService.getUserCommissions();
         try {
           selectedDateCommission = allCommissions.firstWhere(
@@ -53,10 +109,10 @@ class _CommissionScreenState extends State<CommissionScreen> {
         }
       }
 
-      // Load commission summary (last 30 days)
       final summary = await CommissionsService.getCommissionSummary();
 
       setState(() {
+        _commissionData = commissionData;
         _todayCommission = selectedDateCommission;
         _commissionSummary = summary;
         _isLoading = false;
@@ -98,8 +154,62 @@ class _CommissionScreenState extends State<CommissionScreen> {
       ),
       body: Column(
         children: [
-          Expanded(child: _buildMainContent()),
-          _buildBottomSection(),
+          _buildUserNameContainer(),
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                children: [
+                  _buildMainContent(),
+                  if (!_isLoading) _buildTimeSlotsList(),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUserNameContainer() {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF2C5F5F), // Dark teal color
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.person, color: Colors.white, size: 20),
+          const SizedBox(width: 12),
+          const Text(
+            'ភ្នាក់ងារ:',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _userName,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
         ],
       ),
     );
@@ -115,17 +225,17 @@ class _CommissionScreenState extends State<CommissionScreen> {
           borderRadius: BorderRadius.circular(16),
         ),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Row(
-                  children: [
-                    _buildCircularSummary(),
-                    const SizedBox(width: 20),
-                    Expanded(child: _buildFinancialData()),
-                  ],
-                ),
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildCircularSummary(),
+                  const SizedBox(width: 20),
+                  Expanded(child: _buildFinancialData()),
+                ],
               ),
             ),
             _buildDateNavigation(),
@@ -186,31 +296,46 @@ class _CommissionScreenState extends State<CommissionScreen> {
       );
     }
 
+    // Get summary data from commission data
+    final summaryData = _commissionData.firstWhere(
+      (data) => data.isSummary,
+      orElse: () => CommissionTimeSlotData(
+        type: 'summary',
+        bonus: _todayCommission?.totalCommissionAmount ?? 0,
+        totalBets: _todayCommission?.totalBetAmount ?? 0,
+        customerBets: 0,
+        agentBets: 0,
+        totalPayout: _todayCommission?.totalWinAmount ?? 0,
+        winLoss: 0,
+      ),
+    );
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        // _buildDataItem(
-        //   'ប្រាក់រង្វាន់',
-        //   '${_todayCommission?.totalCommissionAmount ?? 0} ៛',
-        //   isUnderlined: true,
-        // ),
-        // const SizedBox(height: 12),
+        _buildDataItem('ប្រាក់រង្វាន់', '${_formatNumber(summaryData.bonus)}៛'),
+        const SizedBox(height: 12),
         _buildDataItem(
           'សរុបភ្នាល់',
-          '${_todayCommission?.totalBetAmount ?? 0} ៛',
+          '${_formatNumber(summaryData.totalBets)}៛',
         ),
         const SizedBox(height: 12),
-        _buildDataItem('អតិថិជនចាក់', '${_todayCommission?.betCount ?? 0}'),
+        _buildDataItem(
+          'អតិថិជនចាក់',
+          '${_formatNumber(summaryData.customerBets)}៛',
+        ),
         const SizedBox(height: 12),
         _buildDataItem(
           'ភ្នាក់ងារចាក់',
-          '${_commissionSummary?.uniqueAgentCount ?? 0}',
+          '${_formatNumber(summaryData.agentBets)}៛',
         ),
         const SizedBox(height: 12),
-        _buildDataItem('ឈ្នះ', '${_todayCommission?.totalWinAmount ?? 0} ៛'),
-        const SizedBox(height: 12),
-        _buildDataItem('ចាញ់', '${_todayCommission?.totalLossAmount ?? 0} ៛'),
+        _buildDataItem(
+          'ឈ្នះចាញ់',
+          '${summaryData.winLoss >= 0 ? '+' : ''}${_formatNumber(summaryData.winLoss)}៛',
+          valueColor: summaryData.winLoss >= 0 ? Colors.green : Colors.red,
+        ),
       ],
     );
   }
@@ -219,6 +344,7 @@ class _CommissionScreenState extends State<CommissionScreen> {
     String label,
     String value, {
     bool isUnderlined = false,
+    Color? valueColor,
   }) {
     return Row(
       children: [
@@ -235,8 +361,8 @@ class _CommissionScreenState extends State<CommissionScreen> {
         ),
         Text(
           value,
-          style: const TextStyle(
-            color: Colors.white,
+          style: TextStyle(
+            color: valueColor ?? Colors.white,
             fontSize: 16,
             fontWeight: FontWeight.bold,
           ),
@@ -305,16 +431,183 @@ class _CommissionScreenState extends State<CommissionScreen> {
     return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
   }
 
-  Widget _buildBottomSection() {
+  Widget _buildTimeSlotsList() {
+    if (_isLoading || _commissionData.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    // Filter out summary and get only time slots
+    final timeSlots = _commissionData.where((data) => data.isTimeSlot).toList();
+
+    if (timeSlots.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
     return Container(
-      height: 200,
-      color: Colors.white,
-      child: const Center(
-        child: Text(
-          'Additional content area',
-          style: TextStyle(color: Colors.grey, fontSize: 16),
-        ),
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: timeSlots.map((slot) => _buildTimeSlotCard(slot)).toList(),
       ),
     );
+  }
+
+  Widget _buildTimeSlotCard(CommissionTimeSlotData slot) {
+    // Determine color based on win/loss
+    Color barColor;
+    if (slot.winLoss > 0) {
+      barColor = Colors.green;
+    } else if (slot.winLoss < 0) {
+      barColor = Colors.red;
+    } else {
+      barColor = Colors.blue;
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey.shade300),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          // Colored bar
+          Container(
+            width: 6,
+            decoration: BoxDecoration(
+              color: barColor,
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(8),
+                bottomLeft: Radius.circular(8),
+              ),
+            ),
+          ),
+          // Content
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Title
+                  Text(
+                    slot.lotteryTime ?? '',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  // Details row
+                  Row(
+                    children: [
+                      // Left column
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildTimeSlotDetail(
+                              'សរុបភ្នាល់',
+                              '${_formatNumber(slot.totalBets)}',
+                            ),
+                            const SizedBox(height: 8),
+                            _buildTimeSlotDetail(
+                              'អតិថិជនចាក់',
+                              '${_formatNumber(slot.customerBets)}',
+                            ),
+                            const SizedBox(height: 8),
+                            _buildTimeSlotDetail(
+                              'ភ្នាក់ងារចាក់',
+                              '${_formatNumber(slot.agentBets)}',
+                            ),
+                            const SizedBox(height: 8),
+                            _buildTimeSlotDetail(
+                              'សរុបសង',
+                              '${_formatNumber(slot.totalPayout)}',
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 40),
+                      // Right column - Win/Loss
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            slot.winLoss >= 0 ? 'ឈ្នះ' : 'ចាញ់',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: slot.winLoss >= 0
+                                  ? Colors.green.shade700
+                                  : Colors.red.shade700,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${_formatNumber(slot.winLoss.abs())}៛',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: slot.winLoss >= 0
+                                  ? Colors.green.shade700
+                                  : Colors.red.shade700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTimeSlotDetail(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          '$label :',
+          style: TextStyle(
+            fontSize: 13,
+            color: Colors.grey[700],
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+            color: Colors.black87,
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _formatNumber(int number) {
+    return number.toString().replaceAllMapped(
+      RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
+      (Match m) => '${m[1]},',
+    );
+  }
+
+  Widget _buildBottomSection() {
+    return const SizedBox.shrink();
   }
 }

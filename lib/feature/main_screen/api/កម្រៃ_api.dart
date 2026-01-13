@@ -186,6 +186,15 @@ class CommissionsApi {
 
       final dateStr = date.toIso8601String().split('T')[0];
 
+      // Helper function to safely convert to int
+      int _toInt(dynamic value) {
+        if (value == null) return 0;
+        if (value is int) return value;
+        if (value is double) return value.toInt();
+        if (value is String) return int.tryParse(value) ?? 0;
+        return 0;
+      }
+
       // Since Supabase doesn't support direct SQL execution, we'll break it down into multiple queries
       // Get agent data with lottery times
       final betsResponse = await _supabase
@@ -201,16 +210,29 @@ class CommissionsApi {
           .eq('user_id', user.id)
           .eq('bet_date', dateStr);
 
-      // Get win data
-      final betResultsResponse = await _supabase
-          .from('bet_results')
-          .select('''
-            bet_id,
-            win_amount,
-            date,
-            bets!inner(lottery_time, user_id)
-          ''')
-          .eq('date', dateStr);
+      // Get all bet IDs for this user and date first
+      final userBetIds = betsResponse
+          .map((bet) => _toInt(bet['id']))
+          .where((id) => id > 0)
+          .toList();
+
+      // Get win data - filter by bet_ids that belong to the user
+      final betResultsResponse = userBetIds.isEmpty
+          ? <Map<String, dynamic>>[]
+          : await _supabase
+                .from('bet_results')
+                .select('''
+                bet_id,
+                win_amount,
+                date,
+                lottery_time,
+                bets!inner(
+                  lottery_time,
+                  user_id
+                )
+              ''')
+                .eq('date', dateStr)
+                .inFilter('bet_id', userBetIds);
 
       // Get commission data
       final commissionResponse = await _supabase
@@ -219,15 +241,6 @@ class CommissionsApi {
           .eq('user_id', user.id)
           .eq('date', dateStr)
           .maybeSingle();
-
-      // Helper function to safely convert to int
-      int _toInt(dynamic value) {
-        if (value == null) return 0;
-        if (value is int) return value;
-        if (value is double) return value.toInt();
-        if (value is String) return int.tryParse(value) ?? 0;
-        return 0;
-      }
 
       // Process the data
       final List<Map<String, dynamic>> result = [];
@@ -286,16 +299,21 @@ class CommissionsApi {
         }
       }
 
-      // Add win amounts
+      // Add win amounts - now filtered by user_id
       for (var result in betResultsResponse) {
-        final bet = result['bets'] as Map<String, dynamic>?;
-        if (bet != null) {
-          final lotteryTime = bet['lottery_time'] as String? ?? '';
-          final winAmount = _toInt(result['win_amount']);
-          if (lotteryTime.isNotEmpty && timeSlotData.containsKey(lotteryTime)) {
-            timeSlotData[lotteryTime]!['total_payout'] =
-                _toInt(timeSlotData[lotteryTime]!['total_payout']) + winAmount;
+        // Try to get lottery_time from bet_results first, then from bets
+        String lotteryTime = result['lottery_time'] as String? ?? '';
+        if (lotteryTime.isEmpty) {
+          final bet = result['bets'] as Map<String, dynamic>?;
+          if (bet != null) {
+            lotteryTime = bet['lottery_time'] as String? ?? '';
           }
+        }
+
+        final winAmount = _toInt(result['win_amount']);
+        if (lotteryTime.isNotEmpty && timeSlotData.containsKey(lotteryTime)) {
+          timeSlotData[lotteryTime]!['total_payout'] =
+              _toInt(timeSlotData[lotteryTime]!['total_payout']) + winAmount;
         }
       }
 

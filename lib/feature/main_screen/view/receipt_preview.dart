@@ -181,8 +181,6 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
           // Header with Logo
           _buildHeader(firstBet, now),
 
-          const SizedBox(height: 24),
-
           // Customer Information
           _buildCustomerInfo(firstBet),
 
@@ -256,11 +254,11 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
               const SizedBox(height: 4),
               _buildInvoiceDetailRow('ម៉ោងឆ្នោត:', firstBet.lotteryTime),
               const SizedBox(height: 4),
-              _buildInvoiceDetailRowWithColor(
-                'ស្ថានភាព:',
-                _fetchedBetList.first.isPaid ? 'បានបង់' : 'មិនទាន់បង់',
-                _fetchedBetList.first.isPaid ? Colors.green : Colors.orange,
-              ),
+              // _buildInvoiceDetailRowWithColor(
+              //   'ស្ថានភាព:',
+              //   _fetchedBetList.first.isPaid ? 'បានបង់' : 'មិនទាន់បង់',
+              //   _fetchedBetList.first.isPaid ? Colors.green : Colors.orange,
+              // ),
             ],
           ),
         ),

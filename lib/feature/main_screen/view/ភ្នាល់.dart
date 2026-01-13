@@ -3861,10 +3861,11 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
   }
 
   /// Extract time from lottery time name (e.g., "យួន 2:30PM" -> 14:30 in minutes)
+  /// Handles formats: "10:30AM", "2:30PM", "8:00 AM", "12:00" (assumed PM/noon)
   int? _extractTimeFromLotteryTimeName(String lotteryTimeName) {
     try {
-      // Try to extract time pattern like "2:30PM", "10:30AM", "6:30PM", etc.
-      // Pattern: digits:digitsAM/PM or digits:digits AM/PM
+      // Pattern 1: Try to extract time with AM/PM (with or without space)
+      // Matches: "10:30AM", "2:30PM", "8:00 AM", "2:00 PM", etc.
       final timePattern = RegExp(
         r'(\d{1,2}):(\d{2})\s*(AM|PM)',
         caseSensitive: false,
@@ -3880,19 +3881,27 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
         if (period == 'PM' && hour != 12) {
           hour24 = hour + 12;
         } else if (period == 'AM' && hour == 12) {
-          hour24 = 0;
+          hour24 = 0; // 12:00 AM = midnight = 0:00
         }
+        // If period is PM and hour is 12, keep it as 12 (12:00 PM = noon = 12:00)
 
         return hour24 * 60 + minute;
       }
 
-      // If no AM/PM pattern found, try 24-hour format (e.g., "14:30")
+      // Pattern 2: Try 24-hour format (e.g., "14:30", "08:45")
+      // This also catches times without AM/PM like "12:00" (assumed to be noon/PM)
       final timePattern24 = RegExp(r'(\d{1,2}):(\d{2})');
       final match24 = timePattern24.firstMatch(lotteryTimeName);
 
       if (match24 != null) {
         final hour = int.tryParse(match24.group(1) ?? '') ?? 0;
         final minute = int.tryParse(match24.group(2) ?? '') ?? 0;
+
+        // If hour is 0-11 and no AM/PM was found, assume it's already in 24-hour format
+        // But if it's 12:00 without AM/PM, assume it's noon (12:00 PM = 12:00)
+        // For lottery times, times like "12:00" are almost certainly noon, not midnight
+        // So we keep it as-is (12:00 = 720 minutes = noon)
+
         return hour * 60 + minute;
       }
 
@@ -3900,6 +3909,84 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
     } catch (e) {
       print('Error extracting time from lottery time name: $e');
       return null;
+    }
+  }
+
+  /// Show receipt preview for selected groups
+  Future<void> _showReceiptPreviewForSelectedGroups() async {
+    if (_selectedGroups.isEmpty) {
+      Get.snackbar(
+        'កំហុស',
+        'សូមជ្រើសរើសភ្នាល់ដើម្បីបោះពុម្ព',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+        snackPosition: SnackPosition.TOP,
+      );
+      return;
+    }
+
+    try {
+      final groupedBets = _groupBetsByCustomerTime();
+      List<BetData> allBetsToShow = [];
+      String? customerName;
+      String? lotteryTime;
+      int totalAmount = 0;
+
+      // Collect all bets from selected groups
+      for (var selectedKey in _selectedGroups) {
+        final groupBets = groupedBets[selectedKey] ?? [];
+        if (groupBets.isEmpty) continue;
+
+        // Get customer name and lottery time from first bet
+        if (customerName == null || lotteryTime == null) {
+          final firstBet = groupBets.first;
+          customerName = firstBet['customer_name'] as String? ?? '';
+          lotteryTime = firstBet['lottery_time'] as String? ?? '';
+        }
+
+        // Convert each bet to BetData
+        for (var bet in groupBets) {
+          try {
+            final betData = BetData.fromMap(bet);
+            allBetsToShow.add(betData);
+            totalAmount += betData.totalAmount;
+          } catch (e) {
+            print('Error converting bet to BetData: $e');
+          }
+        }
+      }
+
+      if (allBetsToShow.isEmpty) {
+        Get.snackbar(
+          'កំហុស',
+          'មិនមានទិន្នន័យសម្រាប់បោះពុម្ព',
+          backgroundColor: Colors.red,
+          colorText: Colors.white,
+          snackPosition: SnackPosition.TOP,
+        );
+        return;
+      }
+
+      // Close bottom sheet and show receipt preview
+      Navigator.of(context).pop();
+
+      Get.to(
+        () => ReceiptPreview(
+          betList: allBetsToShow,
+          totalAmount: totalAmount,
+          customerName: customerName,
+          lotteryTime: lotteryTime,
+          billType: widget.billType,
+        ),
+      );
+    } catch (e) {
+      Get.snackbar(
+        'កំហុស',
+        'មិនអាចបោះពុម្ពបាន: $e',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+        snackPosition: SnackPosition.TOP,
+      );
     }
   }
 
@@ -3936,7 +4023,8 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
         }
       }
 
-      // Get current time
+      // Get current time (resets automatically each day)
+      // DateTime.now() gives current date and time, so comparisons reset day by day
       final DateTime now = DateTime.now();
       final TimeOfDay currentTime = TimeOfDay.fromDateTime(now);
       final int currentMinutes = currentTime.hour * 60 + currentTime.minute;
@@ -3950,14 +4038,58 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
         );
 
         if (lotteryTimeMinutes != null) {
-          // Simple check: if lottery time < current time, it has passed
-          if (lotteryTimeMinutes < currentMinutes) {
+          // Check if lottery time has passed TODAY
+          // Logic: Block cancellation only if the lottery draw time has already occurred today
+          // This automatically resets each day - tomorrow's lottery times are considered "future"
+          // We compare times within the same day, handling morning/afternoon boundaries correctly
+
+          bool hasPassed = false;
+
+          // Convert to minutes since midnight for comparison
+          // Morning times: 0-719 minutes (00:00 - 11:59)
+          // Afternoon/Evening times: 720-1439 minutes (12:00 - 23:59)
+
+          final int noonMinutes = 12 * 60; // 720 minutes = 12:00 PM
+
+          // Case 1: Lottery time is in the morning (before 12:00 PM)
+          if (lotteryTimeMinutes < noonMinutes) {
+            // Morning lottery (e.g., 10:30AM = 630 minutes, 1:00AM = 60 minutes)
+            if (currentMinutes < noonMinutes) {
+              // Both are morning - compare directly
+              // If current time >= lottery time, lottery has passed
+              hasPassed = currentMinutes >= lotteryTimeMinutes;
+            } else {
+              // Current time is afternoon/evening, morning lottery has passed
+              hasPassed = true;
+            }
+          }
+          // Case 2: Lottery time is afternoon/evening (12:00 PM or later)
+          else {
+            // Afternoon/evening lottery (e.g., 1:30PM = 810 minutes, 6:30PM = 1110 minutes, 11:30PM = 1410 minutes)
+            if (currentMinutes < noonMinutes) {
+              // Current time is morning, lottery is afternoon/evening - hasn't passed yet
+              hasPassed = false;
+            } else {
+              // Both are afternoon/evening - compare directly
+              // If current time >= lottery time, lottery has passed
+              hasPassed = currentMinutes >= lotteryTimeMinutes;
+            }
+          }
+
+          // Debug logging for troubleshooting
+          // Note: This resets automatically each day since DateTime.now() gives current date
+          print(
+            '⏰ Cancellation check [${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}]: lotteryTime=$lotteryTimeName (${lotteryTimeMinutes}min), currentTime=${currentTime.hour}:${currentTime.minute} (${currentMinutes}min), hasPassed=$hasPassed',
+          );
+
+          if (hasPassed) {
             pastLotteryTimes.add(lotteryTimeName);
             continue;
           }
         }
 
         // Fallback: check against closing_time table if time extraction failed
+        // This also resets day by day since it uses currentMinutes from DateTime.now()
         final closingTimes = await ClosingTimeService.getAllClosingTimes();
         final closingTime = closingTimes.firstWhere(
           (ct) => ct.timeName == lotteryTimeName,
@@ -3973,13 +4105,14 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
 
         if (closingTime.id != 0 && closingTime.endTime.isNotEmpty) {
           // Parse end_time (format: HH:MM:SS or HH:MM)
+          // Note: This compares against TODAY's time, so it resets automatically each day
           final endTimeParts = closingTime.endTime.split(':');
           if (endTimeParts.length >= 2) {
             final endHour = int.tryParse(endTimeParts[0]) ?? 0;
             final endMinute = int.tryParse(endTimeParts[1]) ?? 0;
             final endMinutes = endHour * 60 + endMinute;
 
-            // Check if current time is past the closing time
+            // Check if current time is past the closing time TODAY
             bool isPastClosing = false;
 
             if (endMinutes < 12 * 60) {
@@ -4704,8 +4837,43 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
                     child: SafeArea(
                       child: Column(
                         children: [
+                          // Print button (for all selected groups)
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed:
+                                  _isProcessing || _selectedGroups.isEmpty
+                                  ? null
+                                  : _showReceiptPreviewForSelectedGroups,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.orange,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 16,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Icon(Icons.print, color: Colors.white),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'បោះពុម្ព (${_selectedGroups.length})',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                           // Pay button (only for groups with pending bets)
                           if (hasPendingBets) ...[
+                            const SizedBox(height: 12),
                             SizedBox(
                               width: double.infinity,
                               child: ElevatedButton(
@@ -4930,6 +5098,37 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
                               ),
                             ),
                           ),
+                        // Print button (for selected group)
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: _isProcessing || _selectedGroups.isEmpty
+                                ? null
+                                : _showReceiptPreviewForSelectedGroups,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.orange,
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.print, color: Colors.white),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'បោះពុម្ព',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                         // Save button (only shown when bets are being edited)
                         if (_editingBetIds.isNotEmpty) ...[
                           const SizedBox(height: 12),

@@ -988,12 +988,11 @@ class _BettingScreenState extends State<BettingScreen> {
   }
 
   void _clearFormPartial() {
-    // Only clear bet numbers and amount
-    // Keep customer name, time, and conditions for easy adding more numbers
+    // Only clear bet numbers for next bet; keep amount (and name, time, conditions)
+    // Amount is cleared only when user clicks ចាក់ថ្មី (new bet)
     _betNumberController.clear();
-    _amountController.clear();
     _expandedNumbers.clear();
-    // DON'T clear name, time, or checkboxes
+    // DON'T clear _amountController, name, time, or checkboxes
     setState(() {});
   }
 
@@ -1945,8 +1944,12 @@ class _BettingScreenState extends State<BettingScreen> {
                 _focusedFieldIndex = 0;
               } else if (controller == _betNumberController) {
                 _focusedFieldIndex = 1;
+                // Dismiss system keyboard when switching to bet number (use custom keypad only)
+                FocusScope.of(context).unfocus();
               } else if (controller == _amountController) {
                 _focusedFieldIndex = 2;
+                // Dismiss system keyboard when switching to amount (use custom keypad only)
+                FocusScope.of(context).unfocus();
               }
               setState(() {});
             }

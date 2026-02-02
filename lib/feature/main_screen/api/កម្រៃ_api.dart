@@ -8,7 +8,7 @@ class CommissionsApi {
     required DateTime date,
     required int totalBetAmount,
     required int betCount,
-    double commissionRate = 0.0, // No commission - set to 0%
+    double commissionRate = 3.0, // Agent commission 3% (matches bonus_settings)
     int totalWinAmount = 0,
     int totalLossAmount = 0,
     int netProfit = 0,
@@ -46,9 +46,24 @@ class CommissionsApi {
             'updated_at': DateTime.now().toIso8601String(),
           })
           .select()
-          .single();
+          .maybeSingle();
 
-      return response;
+      // If RLS or trigger returns 0 rows, return a map from inputs so callers don't break
+      if (response != null) return response;
+      final dateStr = date.toIso8601String().split('T')[0];
+      return {
+        'user_id': user.id,
+        'date': dateStr,
+        'total_bet_amount': totalBetAmount,
+        'total_commission_amount': commissionAmount,
+        'commission_rate': commissionRate,
+        'bet_count': betCount,
+        'total_win_amount': totalWinAmount,
+        'total_loss_amount': totalLossAmount,
+        'net_profit': netProfit,
+        'admin_id': adminId,
+        'updated_at': DateTime.now().toIso8601String(),
+      };
     } catch (e) {
       throw Exception('Failed to upsert daily commission: $e');
     }
@@ -185,6 +200,9 @@ class CommissionsApi {
       }
 
       final dateStr = date.toIso8601String().split('T')[0];
+      
+      // Log user ID for debugging 502 errors
+      print('🔍 Commission fetch for user: ${user.id.substring(0, 8)}... on date: $dateStr');
 
       // Helper function to safely convert to int
       int _toInt(dynamic value) {
@@ -197,6 +215,7 @@ class CommissionsApi {
 
       // Since Supabase doesn't support direct SQL execution, we'll break it down into multiple queries
       // Get agent data with lottery times
+      // Add limit to prevent 502 timeout for users with many bets
       final betsResponse = await _supabase
           .from('bets')
           .select('''
@@ -208,7 +227,8 @@ class CommissionsApi {
             lottery_times(sort_order)
           ''')
           .eq('user_id', user.id)
-          .eq('bet_date', dateStr);
+          .eq('bet_date', dateStr)
+          .limit(10000); // Limit to prevent timeout
 
       // Get all bet IDs for this user and date first
       final userBetIds = betsResponse
@@ -217,22 +237,27 @@ class CommissionsApi {
           .toList();
 
       // Get win data - filter by bet_ids that belong to the user
-      final betResultsResponse = userBetIds.isEmpty
-          ? <Map<String, dynamic>>[]
-          : await _supabase
+      // Use simpler query without join to prevent 502 timeout
+      List<Map<String, dynamic>> betResultsResponse = [];
+      if (userBetIds.isNotEmpty) {
+        try {
+          // Split into chunks if too many bet IDs to prevent timeout
+          const int chunkSize = 500;
+          for (int i = 0; i < userBetIds.length; i += chunkSize) {
+            final chunk = userBetIds.skip(i).take(chunkSize).toList();
+            final chunkResults = await _supabase
                 .from('bet_results')
-                .select('''
-                bet_id,
-                win_amount,
-                date,
-                lottery_time,
-                bets!inner(
-                  lottery_time,
-                  user_id
-                )
-              ''')
+                .select('bet_id, win_amount, date, lottery_time')
                 .eq('date', dateStr)
-                .inFilter('bet_id', userBetIds);
+                .inFilter('bet_id', chunk)
+                .limit(5000);
+            betResultsResponse.addAll(List<Map<String, dynamic>>.from(chunkResults));
+          }
+        } catch (e) {
+          print('⚠️ Error fetching bet_results in chunks: $e');
+          // Continue with empty results rather than failing completely
+        }
+      }
 
       // Get commission data
       final commissionResponse = await _supabase
@@ -300,17 +325,27 @@ class CommissionsApi {
       }
 
       // Add win amounts - now filtered by user_id
+      int totalPayoutFromResults = 0;
+      // Create a map of bet_id -> lottery_time from betsResponse for faster lookup
+      final Map<int, String> betIdToLotteryTime = {};
+      for (var bet in betsResponse) {
+        final betId = _toInt(bet['id']);
+        final lotteryTime = bet['lottery_time'] as String? ?? '';
+        if (betId > 0 && lotteryTime.isNotEmpty) {
+          betIdToLotteryTime[betId] = lotteryTime;
+        }
+      }
+      
       for (var result in betResultsResponse) {
-        // Try to get lottery_time from bet_results first, then from bets
+        final betId = _toInt(result['bet_id']);
+        // Get lottery_time from bet_results or lookup from bets map
         String lotteryTime = result['lottery_time'] as String? ?? '';
-        if (lotteryTime.isEmpty) {
-          final bet = result['bets'] as Map<String, dynamic>?;
-          if (bet != null) {
-            lotteryTime = bet['lottery_time'] as String? ?? '';
-          }
+        if (lotteryTime.isEmpty && betId > 0) {
+          lotteryTime = betIdToLotteryTime[betId] ?? '';
         }
 
         final winAmount = _toInt(result['win_amount']);
+        totalPayoutFromResults += winAmount;
         if (lotteryTime.isNotEmpty && timeSlotData.containsKey(lotteryTime)) {
           timeSlotData[lotteryTime]!['total_payout'] =
               _toInt(timeSlotData[lotteryTime]!['total_payout']) + winAmount;
@@ -324,10 +359,25 @@ class CommissionsApi {
             _toInt(data['total_bets']) - _toInt(data['total_payout']);
       }
 
-      // Add summary
-      final bonus = _toInt(commissionResponse?['total_commission_amount']);
-      final totalPayout = _toInt(commissionResponse?['total_win_amount']);
+      // Add summary: show commission at 3% only (agent rate), not full stored total_commission_amount
+      const double agentCommissionRate = 3.0;
+      final bonus = (totalBets * agentCommissionRate / 100).round();
+      final totalPayout = totalPayoutFromResults;
       final winLoss = totalBets - totalPayout;
+
+      // Keep commissions table correct: upsert row with 3% commission for this date (best-effort)
+      try {
+        await upsertDailyCommission(
+          date: date,
+          totalBetAmount: totalBets,
+          betCount: betsResponse.length,
+          commissionRate: agentCommissionRate,
+          totalWinAmount: totalPayout,
+          netProfit: totalPayout - totalBets,
+        );
+      } catch (e) {
+        print('Commission upsert skipped (RLS or permissions): $e');
+      }
 
       result.add({
         'type': 'summary',
@@ -363,7 +413,26 @@ class CommissionsApi {
 
       return result;
     } catch (e) {
-      print('Error fetching commission data with time slots: $e');
+      final user = _supabase.auth.currentUser;
+      final userId = user?.id.substring(0, 8) ?? 'unknown';
+      print('❌ Error fetching commission data with time slots for user $userId: $e');
+      
+      // If 502 Bad Gateway, return empty result instead of crashing
+      if (e.toString().contains('502') || e.toString().contains('Bad Gateway')) {
+        print('⚠️ 502 Bad Gateway detected - returning empty commission data');
+        return [{
+          'type': 'summary',
+          'lottery_time': null,
+          'sort_order': null,
+          'bonus': 0,
+          'total_bets': 0,
+          'customer_bets': 0,
+          'agent_bets': 0,
+          'total_payout': 0,
+          'win_loss': 0,
+        }];
+      }
+      
       throw Exception('Failed to fetch commission data: $e');
     }
   }

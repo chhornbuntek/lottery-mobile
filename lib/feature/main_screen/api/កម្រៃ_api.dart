@@ -30,11 +30,12 @@ class CommissionsApi {
 
       final commissionAmount = (totalBetAmount * commissionRate / 100).round();
 
+      final dateStr = date.toIso8601String().split('T')[0];
       final response = await _supabase
           .from('commissions')
           .upsert({
             'user_id': user.id,
-            'date': date.toIso8601String().split('T')[0], // YYYY-MM-DD format
+            'date': dateStr,
             'total_bet_amount': totalBetAmount,
             'total_commission_amount': commissionAmount,
             'commission_rate': commissionRate,
@@ -44,13 +45,12 @@ class CommissionsApi {
             'net_profit': netProfit,
             'admin_id': adminId, // Auto-populate admin_id
             'updated_at': DateTime.now().toIso8601String(),
-          })
+          }, onConflict: 'user_id,date')
           .select()
           .maybeSingle();
 
       // If RLS or trigger returns 0 rows, return a map from inputs so callers don't break
       if (response != null) return response;
-      final dateStr = date.toIso8601String().split('T')[0];
       return {
         'user_id': user.id,
         'date': dateStr,
@@ -213,9 +213,15 @@ class CommissionsApi {
         return 0;
       }
 
-      // Since Supabase doesn't support direct SQL execution, we'll break it down into multiple queries
-      // Get agent data with lottery times
-      // Add limit to prevent 502 timeout for users with many bets
+      // 1) Fetch commission row FIRST so we always have summary data even when bet_results 502s
+      final commissionResponse = await _supabase
+          .from('commissions')
+          .select('total_commission_amount, total_win_amount, total_bet_amount, net_profit')
+          .eq('user_id', user.id)
+          .eq('date', dateStr)
+          .maybeSingle();
+
+      // 2) Get bets for this user and date
       final betsResponse = await _supabase
           .from('bets')
           .select('''
@@ -228,21 +234,20 @@ class CommissionsApi {
           ''')
           .eq('user_id', user.id)
           .eq('bet_date', dateStr)
-          .limit(10000); // Limit to prevent timeout
+          .limit(10000);
 
-      // Get all bet IDs for this user and date first
+      // Get all bet IDs for this user and date
       final userBetIds = betsResponse
           .map((bet) => _toInt(bet['id']))
           .where((id) => id > 0)
           .toList();
 
-      // Get win data - filter by bet_ids that belong to the user
-      // Use simpler query without join to prevent 502 timeout
+      // 3) Get win data in small chunks; skip entirely if too many bets to avoid 502
       List<Map<String, dynamic>> betResultsResponse = [];
-      if (userBetIds.isNotEmpty) {
+      const int maxBetIdsForResults = 1500; // Skip bet_results when more (use commission row for payout)
+      if (userBetIds.isNotEmpty && userBetIds.length <= maxBetIdsForResults) {
         try {
-          // Split into chunks if too many bet IDs to prevent timeout
-          const int chunkSize = 500;
+          const int chunkSize = 150; // Smaller chunks to reduce 502
           for (int i = 0; i < userBetIds.length; i += chunkSize) {
             final chunk = userBetIds.skip(i).take(chunkSize).toList();
             final chunkResults = await _supabase
@@ -250,22 +255,16 @@ class CommissionsApi {
                 .select('bet_id, win_amount, date, lottery_time')
                 .eq('date', dateStr)
                 .inFilter('bet_id', chunk)
-                .limit(5000);
+                .limit(2000);
             betResultsResponse.addAll(List<Map<String, dynamic>>.from(chunkResults));
           }
         } catch (e) {
           print('⚠️ Error fetching bet_results in chunks: $e');
-          // Continue with empty results rather than failing completely
+          // Summary will use commission row (total_win_amount) for payout/winLoss
         }
+      } else if (userBetIds.length > maxBetIdsForResults) {
+        print('⚠️ Skipping bet_results (${userBetIds.length} bets) - using commission row for payout');
       }
-
-      // Get commission data
-      final commissionResponse = await _supabase
-          .from('commissions')
-          .select('total_commission_amount, total_win_amount')
-          .eq('user_id', user.id)
-          .eq('date', dateStr)
-          .maybeSingle();
 
       // Process the data
       final List<Map<String, dynamic>> result = [];
@@ -359,13 +358,24 @@ class CommissionsApi {
             _toInt(data['total_bets']) - _toInt(data['total_payout']);
       }
 
-      // Add summary: show commission at 3% only (agent rate), not full stored total_commission_amount
+      // Summary: prefer commission table values when available (so 502 on bet_results still shows correct win/loss)
       const double agentCommissionRate = 3.0;
-      final bonus = (totalBets * agentCommissionRate / 100).round();
-      final totalPayout = totalPayoutFromResults;
-      final winLoss = totalBets - totalPayout;
+      final bonusFromDb = _toInt(commissionResponse?['total_commission_amount']);
+      final totalPayoutFromDb = _toInt(commissionResponse?['total_win_amount']);
+      final totalBetsFromDb = _toInt(commissionResponse?['total_bet_amount']);
+      final netProfitFromDb = commissionResponse?['net_profit'];
+      // When bets query failed or empty, use commission row so screen still shows values
+      final effectiveTotalBets = totalBets > 0 ? totalBets : totalBetsFromDb;
+      final bonus = bonusFromDb > 0 ? bonusFromDb : (effectiveTotalBets * agentCommissionRate / 100).round();
+      // Use DB total_win_amount when bet_results failed (0) or when we have it, so ឈ្នះចាញ់ shows correctly
+      final totalPayout = totalPayoutFromResults > 0 ? totalPayoutFromResults : totalPayoutFromDb;
+      // Win/loss: prefer net_profit from DB when available (total_bet - total_win = agent profit), else compute
+      final winLoss = netProfitFromDb != null
+          ? _toInt(netProfitFromDb)
+          : (effectiveTotalBets - totalPayout);
 
       // Keep commissions table correct: upsert row with 3% commission for this date (best-effort)
+      // Net profit = total_bet_amount - total_win_amount (agent keeps bets minus payouts)
       try {
         await upsertDailyCommission(
           date: date,
@@ -373,7 +383,7 @@ class CommissionsApi {
           betCount: betsResponse.length,
           commissionRate: agentCommissionRate,
           totalWinAmount: totalPayout,
-          netProfit: totalPayout - totalBets,
+          netProfit: totalBets - totalPayout, // Fixed: agent profit = bets received - payouts made
         );
       } catch (e) {
         print('Commission upsert skipped (RLS or permissions): $e');
@@ -384,7 +394,7 @@ class CommissionsApi {
         'lottery_time': null,
         'sort_order': null,
         'bonus': bonus,
-        'total_bets': totalBets,
+        'total_bets': effectiveTotalBets,
         'customer_bets': customerBets,
         'agent_bets': agentBets,
         'total_payout': totalPayout,

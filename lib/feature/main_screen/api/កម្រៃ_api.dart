@@ -369,13 +369,12 @@ class CommissionsApi {
       final bonus = bonusFromDb > 0 ? bonusFromDb : (effectiveTotalBets * agentCommissionRate / 100).round();
       // Use DB total_win_amount when bet_results failed (0) or when we have it, so ឈ្នះចាញ់ shows correctly
       final totalPayout = totalPayoutFromResults > 0 ? totalPayoutFromResults : totalPayoutFromDb;
-      // Win/loss: prefer net_profit from DB when available (total_bet - total_win = agent profit), else compute
+      // Win/loss (ឈ្នះចាញ់): total_bet_amount - total_win_amount = agent profit
       final winLoss = netProfitFromDb != null
           ? _toInt(netProfitFromDb)
           : (effectiveTotalBets - totalPayout);
 
-      // Keep commissions table correct: upsert row with 3% commission for this date (best-effort)
-      // Net profit = total_bet_amount - total_win_amount (agent keeps bets minus payouts)
+      // Keep commissions table correct: net_profit = total_bet_amount - total_win_amount
       try {
         await upsertDailyCommission(
           date: date,
@@ -383,7 +382,7 @@ class CommissionsApi {
           betCount: betsResponse.length,
           commissionRate: agentCommissionRate,
           totalWinAmount: totalPayout,
-          netProfit: totalBets - totalPayout, // Fixed: agent profit = bets received - payouts made
+          netProfit: totalBets - totalPayout, // total_bet_amount - total_win_amount
         );
       } catch (e) {
         print('Commission upsert skipped (RLS or permissions): $e');

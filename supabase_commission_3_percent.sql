@@ -1,15 +1,18 @@
 -- =============================================================================
 -- Commission 3%: fix Supabase functions (run on self-hosting / Supabase SQL Editor)
 -- =============================================================================
--- 1. process_bets_for_result_with_commission uses commission_rate 0.05 (5%)
--- 2. create_commission_on_bet_insert sets total_commission_amount wrong and no rate
--- Both are updated to 3% and commission_rate = 3 to match the app.
+-- FORMULAS (must match mobile app):
+--   net_profit     = total_bet_amount - total_win_amount   (agent profit)
+--   commission 3%  = ROUND(total_bet_amount * 3 / 100)     (ប្រាក់រង្វាន់)
+-- 1. create_commission_on_bet_insert: trigger on bet insert
+-- 2. process_bets_for_result_with_commission: when results are processed
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
 -- 1) Fix trigger: create_commission_on_bet_insert
 --    - Use 3% for total_commission_amount (was wrongly using full bet amount)
 --    - Set commission_rate = 3
+--    - net_profit = total_bet - total_win (positive when no payouts yet)
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.create_commission_on_bet_insert()
 RETURNS trigger
@@ -19,6 +22,7 @@ DECLARE
     existing_commission RECORD;
     new_total_bet BIGINT;
     new_commission_amount INT;
+    new_net_profit INT;
     commission_rate_val NUMERIC := 3;  -- 3%
 BEGIN
     -- Get existing commission record for this user and date
@@ -30,17 +34,21 @@ BEGIN
     IF FOUND THEN
         new_total_bet := existing_commission.total_bet_amount + NEW.total_amount;
         new_commission_amount := ROUND(new_total_bet * commission_rate_val / 100)::INT;
+        -- net_profit = total_bet - total_win (keep existing total_win_amount; will be updated when results processed)
+        new_net_profit := new_total_bet - COALESCE(existing_commission.total_win_amount, 0);
         UPDATE commissions
         SET
             total_bet_amount = new_total_bet,
             bet_count = bet_count + 1,
             total_commission_amount = new_commission_amount,
             commission_rate = commission_rate_val,
+            net_profit = new_net_profit,
             updated_at = NOW()
         WHERE user_id = NEW.user_id
         AND date = NEW.bet_date;
     ELSE
         new_commission_amount := ROUND(NEW.total_amount * commission_rate_val / 100)::INT;
+        -- net_profit = total_bet - total_win; when no results yet, total_win=0 so net_profit = NEW.total_amount (positive)
         INSERT INTO commissions (
             user_id,
             date,
@@ -61,7 +69,7 @@ BEGIN
             1,
             0,
             0,
-            0,  -- net_profit = 0 initially (no wins/losses until results processed)
+            NEW.total_amount,  -- net_profit = bets - 0 = positive until results processed
             NEW.admin_id
         );
     END IF;
@@ -363,3 +371,13 @@ SET
   total_commission_amount = ROUND(total_bet_amount * 3.0 / 100)::INT,
   updated_at = NOW()
 WHERE commission_rate = 0.05 OR commission_rate != 3;
+
+-- -----------------------------------------------------------------------------
+-- 4) Fix net_profit sign: net_profit = total_bet_amount - total_win_amount (agent profit)
+--    Run this to correct rows where net_profit was stored as negative for new agents
+-- -----------------------------------------------------------------------------
+UPDATE public.commissions
+SET
+  net_profit = (total_bet_amount - total_win_amount)::INT,
+  updated_at = NOW()
+WHERE net_profit != (total_bet_amount - total_win_amount);

@@ -216,7 +216,7 @@ class CommissionsApi {
       // 1) Fetch commission row FIRST so we always have summary data even when bet_results 502s
       final commissionResponse = await _supabase
           .from('commissions')
-          .select('total_commission_amount, total_win_amount, total_bet_amount, net_profit')
+          .select('total_commission_amount, total_win_amount, total_bet_amount')
           .eq('user_id', user.id)
           .eq('date', dateStr)
           .maybeSingle();
@@ -363,26 +363,24 @@ class CommissionsApi {
       final bonusFromDb = _toInt(commissionResponse?['total_commission_amount']);
       final totalPayoutFromDb = _toInt(commissionResponse?['total_win_amount']);
       final totalBetsFromDb = _toInt(commissionResponse?['total_bet_amount']);
-      final netProfitFromDb = commissionResponse?['net_profit'];
       // When bets query failed or empty, use commission row so screen still shows values
       final effectiveTotalBets = totalBets > 0 ? totalBets : totalBetsFromDb;
       final bonus = bonusFromDb > 0 ? bonusFromDb : (effectiveTotalBets * agentCommissionRate / 100).round();
       // Use DB total_win_amount when bet_results failed (0) or when we have it, so ឈ្នះចាញ់ shows correctly
       final totalPayout = totalPayoutFromResults > 0 ? totalPayoutFromResults : totalPayoutFromDb;
-      // Win/loss (ឈ្នះចាញ់): total_bet_amount - total_win_amount = agent profit
-      final winLoss = netProfitFromDb != null
-          ? _toInt(netProfitFromDb)
-          : (effectiveTotalBets - totalPayout);
+      // Agent win/loss (ឈ្នះចាញ់): total collected - total paid out (same formula as per time slot).
+      // Do not read commissions.net_profit for UI — some legacy rows store the opposite sign.
+      final winLoss = effectiveTotalBets - totalPayout;
 
-      // Keep commissions table correct: net_profit = total_bet_amount - total_win_amount
+      // Keep commissions table aligned: net_profit = total_bet_amount - total_win_amount
       try {
         await upsertDailyCommission(
           date: date,
-          totalBetAmount: totalBets,
+          totalBetAmount: effectiveTotalBets,
           betCount: betsResponse.length,
           commissionRate: agentCommissionRate,
           totalWinAmount: totalPayout,
-          netProfit: totalBets - totalPayout, // total_bet_amount - total_win_amount
+          netProfit: effectiveTotalBets - totalPayout,
         );
       } catch (e) {
         print('Commission upsert skipped (RLS or permissions): $e');

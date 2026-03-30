@@ -43,6 +43,8 @@ class BetsService {
     required int multiplier,
     required String billType,
     required List<String> selectedConditions,
+    String? invoiceNumber,
+    String? groupToken,
   }) async {
     try {
       final response = await BetsApi.insertPendingBet(
@@ -56,6 +58,8 @@ class BetsService {
         multiplier: multiplier,
         billType: billType,
         selectedConditions: selectedConditions,
+        invoiceNumber: invoiceNumber,
+        groupToken: groupToken,
       );
 
       return BetData.fromMap(response);
@@ -318,6 +322,7 @@ class BetData {
   final String? userId; // User ID who created the bet
   final String? userName; // User name who created the bet
   final String? invoiceNumber; // Invoice number
+  final String? groupToken; // Logical group token for separating sessions
   final bool isPaid; // Whether the bet is paid or not
 
   BetData({
@@ -336,6 +341,7 @@ class BetData {
     this.userId,
     this.userName,
     this.invoiceNumber,
+    this.groupToken,
     this.isPaid = false,
   });
 
@@ -405,6 +411,7 @@ class BetData {
       userId: map['user_id'],
       userName: _extractUserName(map),
       invoiceNumber: map['invoice_number'],
+      groupToken: map['group_token'],
       isPaid: isPaid,
     );
   }
@@ -422,6 +429,7 @@ class BetData {
       'multiplier': multiplier,
       'bill_type': billType,
       'selectedConditions': selectedConditions, // Add this for batch operations
+      if (groupToken != null) 'group_token': groupToken,
       'created_at': createdAt.toIso8601String(),
     };
   }

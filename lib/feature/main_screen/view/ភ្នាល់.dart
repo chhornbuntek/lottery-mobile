@@ -49,6 +49,12 @@ class _BettingScreenState extends State<BettingScreen> {
   int? _editingBetId;
   int _currentEditIndex = 0; // Index of currently editing bet
   bool _isSaving = false;
+  String? _activeGroupInvoiceNumber;
+  String? _activeGroupToken;
+
+  String _createGroupToken() {
+    return DateTime.now().microsecondsSinceEpoch.toString();
+  }
 
   void _onKeypadPressed(String value) {
     setState(() {
@@ -398,6 +404,30 @@ class _BettingScreenState extends State<BettingScreen> {
     setState(() {
       _focusedFieldIndex = (_focusedFieldIndex + 1) % 3;
     });
+  }
+
+  void _focusBetNumberField() {
+    setState(() {
+      _focusedFieldIndex = 1;
+    });
+    // Keep custom keypad flow for bet number input.
+    FocusScope.of(context).unfocus();
+  }
+
+  void _focusAmountField() {
+    setState(() {
+      _focusedFieldIndex = 2;
+    });
+    FocusScope.of(context).unfocus();
+  }
+
+  /// After return: if user was on bet numbers, jump to amount; else keep bet field default.
+  void _focusAfterReturnKey() {
+    if (_focusedFieldIndex == 1) {
+      _focusAmountField();
+    } else {
+      _focusBetNumberField();
+    }
   }
 
   void _handleCheckboxChange(String checkboxKey, bool value) {
@@ -923,6 +953,7 @@ class _BettingScreenState extends State<BettingScreen> {
 
     // Store in pending bets table and track ID
     try {
+      _activeGroupToken ??= _createGroupToken();
       final pendingBet = await BetsService.insertPendingBet(
         customerName: _nameController.text.trim(),
         lotteryTimeId: _selectedLotteryTime!.id,
@@ -934,11 +965,16 @@ class _BettingScreenState extends State<BettingScreen> {
         multiplier: multiplier,
         billType: _selectedBill,
         selectedConditions: filteredConditions,
+        invoiceNumber: _activeGroupInvoiceNumber,
+        groupToken: _activeGroupToken,
       );
 
       // Track the pending bet ID for later payment
       if (pendingBet.id != null) {
         _pendingBetIds.add(pendingBet.id!);
+        _activeGroupInvoiceNumber =
+            pendingBet.invoiceNumber ?? _activeGroupInvoiceNumber;
+        _activeGroupToken = pendingBet.groupToken ?? _activeGroupToken;
 
         // Update the bet in the list with the ID from database
         setState(() {
@@ -954,21 +990,25 @@ class _BettingScreenState extends State<BettingScreen> {
     }
   }
 
-  /// Handler for "ចាក់ថ្មី" button - clears ALL fields for new customer
-  /// Does NOT add bet - only the return button adds bets
+  /// Handler for "ចាក់ថ្មី" — new betting line/session: clears numbers, amount,
+  /// conditions and on-screen list; **keeps customer name + lottery time** so the
+  /// same person and same draw can bet again (same DB group when name/time match).
+  /// Does NOT add a bet — only the return key adds bets.
   void _onNewBetPressed() {
-    // Clear ALL fields - start completely fresh for new customer
-    _clearForm();
+    _activeGroupToken = _createGroupToken();
+    _activeGroupInvoiceNumber = null;
+    _clearForm(keepCustomerName: true);
   }
 
-  void _clearForm() {
-    // Clear everything for "ចាក់ថ្មី" button - start fresh
-    // Keep selected lottery time - don't clear it
-    _nameController.clear();
+  void _clearForm({bool keepCustomerName = false}) {
+    // Clear bet fields; keep lottery time and (when [keepCustomerName]) the name
+    if (!keepCustomerName) {
+      _nameController.clear();
+    }
     _betNumberController.clear();
     _amountController.clear();
     _expandedNumbers.clear();
-    // _selectedLotteryTime = null; // Don't clear time - keep it selected
+    // _selectedLotteryTime = null; // Keep draw time selected
     _checkboxes.updateAll((key, value) => false);
     // Clear display area - bets already inserted to database
     setState(() {
@@ -1153,6 +1193,8 @@ class _BettingScreenState extends State<BettingScreen> {
         _betList.clear();
         _totalAmount = 0;
         _pendingBetIds.clear();
+        _activeGroupInvoiceNumber = null;
+        _activeGroupToken = null;
       });
       _clearForm();
     } catch (e) {
@@ -1597,8 +1639,12 @@ class _BettingScreenState extends State<BettingScreen> {
   // Helper method to group bets by customer and time
   Map<String, List<BetData>> _groupBetsByCustomerTime() {
     Map<String, List<BetData>> grouped = {};
+    final fallbackTime = _selectedLotteryTime?.timeName;
     for (var bet in _betList) {
-      String key = '${bet.customerName}_${bet.lotteryTime}';
+      final key = _groupKeyFromBetData(
+        bet,
+        fallbackLotteryTime: fallbackTime,
+      );
       if (!grouped.containsKey(key)) {
         grouped[key] = [];
       }
@@ -2265,6 +2311,7 @@ class _BettingScreenState extends State<BettingScreen> {
                       // If editing an existing bet, save it
                       if (_editingBetId != null) {
                         await _saveEditedBet();
+                        _focusAfterReturnKey();
                         return;
                       }
 
@@ -2288,11 +2335,12 @@ class _BettingScreenState extends State<BettingScreen> {
                         if (filteredCurrent.isNotEmpty) {
                           // Add new bet to the same group (same customer/time)
                           await _addBetToEditGroup();
+                          _focusAfterReturnKey();
                           return;
                         }
                       }
-                      // Otherwise, switch focus
-                      _switchFocus();
+                      // Otherwise, return to bet number field
+                      _focusAfterReturnKey();
                       return;
                     }
 
@@ -2325,11 +2373,12 @@ class _BettingScreenState extends State<BettingScreen> {
                         if (_betList.length > betListLengthBefore) {
                           _clearFormPartial();
                         }
+                        _focusAfterReturnKey();
                         return;
                       }
                     }
-                    // Otherwise, switch focus
-                    _switchFocus();
+                    // Otherwise, return to bet number field
+                    _focusAfterReturnKey();
                   },
                 ),
               ),
@@ -2630,10 +2679,12 @@ class _BettingScreenState extends State<BettingScreen> {
   /// Group bets to edit by customer name and lottery time
   Map<String, List<Map<String, dynamic>>> _groupBetsToEditByCustomerTime() {
     Map<String, List<Map<String, dynamic>>> grouped = {};
+    final fallbackTime = _selectedLotteryTime?.timeName;
     for (var bet in _betsToEdit) {
-      final customerName = bet['customer_name'] as String? ?? '';
-      final lotteryTime = bet['lottery_time'] as String? ?? '';
-      final key = '${customerName}_$lotteryTime';
+      final key = _groupKeyFromBetMap(
+        bet,
+        fallbackLotteryTime: fallbackTime,
+      );
       if (!grouped.containsKey(key)) {
         grouped[key] = [];
       }
@@ -3208,6 +3259,8 @@ class _BettingScreenState extends State<BettingScreen> {
     final groupCustomerName = firstBet['customer_name'] as String? ?? '';
     final groupLotteryTime = firstBet['lottery_time'] as String? ?? '';
     final groupLotteryTimeId = firstBet['lottery_time_id'] as int?;
+    final groupInvoiceNumber = firstBet['invoice_number'] as String? ?? '';
+    final groupToken = firstBet['group_token'] as String? ?? '';
 
     // Auto-fill form with group's customer name and time if they don't match
     // This ensures new bets are always added to the same group
@@ -3416,6 +3469,8 @@ class _BettingScreenState extends State<BettingScreen> {
         multiplier: multiplier,
         billType: _selectedBill,
         selectedConditions: filteredConditions,
+        invoiceNumber: groupInvoiceNumber,
+        groupToken: groupToken.isNotEmpty ? groupToken : null,
       );
 
       // Add to edit list
@@ -3433,6 +3488,8 @@ class _BettingScreenState extends State<BettingScreen> {
             'total_amount': totalAmount,
             'selected_conditions': filteredConditions,
             'multiplier': multiplier,
+            'invoice_number': pendingBet.invoiceNumber ?? groupInvoiceNumber,
+            'group_token': pendingBet.groupToken ?? groupToken,
           });
         });
 
@@ -3677,6 +3734,49 @@ class _BettingScreenState extends State<BettingScreen> {
   }
 }
 
+/// Normalize for grouping only (not for display): trim, collapse spaces,
+/// strip zero-width chars, case-fold Latin so DB / UI typos still merge.
+String _normalizeGroupField(String? s) {
+  if (s == null) return '';
+  var t = s.trim().replaceAll(RegExp(r'\s+'), ' ');
+  t = t.replaceAll(RegExp(r'[\u200B-\u200D\uFEFF]'), '');
+  return t.toLowerCase();
+}
+
+/// Stable group key: same logical customer + draw time → one card.
+/// When [fallbackLotteryTime] is set (e.g. selected draw on this screen), use it
+/// if the bet row has empty/missing `lottery_time` in DB — otherwise those rows
+/// become a separate "empty time" group from rows with a full time string.
+String _groupKeyFromBetMap(
+  Map<String, dynamic> bet, {
+  String? fallbackLotteryTime,
+}) {
+  final c = _normalizeGroupField(bet['customer_name'] as String?);
+  var t = _normalizeGroupField(bet['lottery_time'] as String?);
+  final token = _normalizeGroupField(bet['group_token'] as String?);
+  if (t.isEmpty &&
+      fallbackLotteryTime != null &&
+      fallbackLotteryTime.trim().isNotEmpty) {
+    t = _normalizeGroupField(fallbackLotteryTime);
+  }
+  return '$c|$t|$token';
+}
+
+String _groupKeyFromBetData(
+  BetData bet, {
+  String? fallbackLotteryTime,
+}) {
+  final c = _normalizeGroupField(bet.customerName);
+  var t = _normalizeGroupField(bet.lotteryTime);
+  final token = _normalizeGroupField(bet.groupToken);
+  if (t.isEmpty &&
+      fallbackLotteryTime != null &&
+      fallbackLotteryTime.trim().isNotEmpty) {
+    t = _normalizeGroupField(fallbackLotteryTime);
+  }
+  return '$c|$t|$token';
+}
+
 /// Bottom sheet widget to display list of bets
 class _BetsBottomSheet extends StatefulWidget {
   final List<Map<String, dynamic>> bets;
@@ -3775,9 +3875,10 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
   Map<String, List<Map<String, dynamic>>> _groupBetsByCustomerTime() {
     Map<String, List<Map<String, dynamic>>> grouped = {};
     for (var bet in _bets) {
-      final customerName = bet['customer_name'] as String? ?? '';
-      final lotteryTime = bet['lottery_time'] as String? ?? '';
-      final key = '${customerName}_$lotteryTime';
+      final key = _groupKeyFromBetMap(
+        bet,
+        fallbackLotteryTime: widget.lotteryTime,
+      );
       if (!grouped.containsKey(key)) {
         grouped[key] = [];
       }
@@ -3786,22 +3887,38 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
     return grouped;
   }
 
-  /// Get group summary data from summary table
+  /// Get group summary from [bet_groups_summary]; merges rows that match after
+  /// [_normalizeGroupField] so duplicate server rows still show one total.
   Map<String, dynamic>? _getGroupSummary(
     String customerName,
     String lotteryTime,
   ) {
-    try {
-      final group = _groupsSummary.firstWhere(
-        (g) =>
-            g['customer_name'] == customerName &&
-            g['lottery_time'] == lotteryTime,
-      );
-      return group;
-    } catch (e) {
-      // If not found in summary, return null
-      return null;
+    final c = _normalizeGroupField(customerName);
+    final t = _normalizeGroupField(lotteryTime);
+    final matches = _groupsSummary
+        .where(
+          (g) =>
+              _normalizeGroupField(g['customer_name'] as String?) == c &&
+              _normalizeGroupField(g['lottery_time'] as String?) == t,
+        )
+        .toList();
+    if (matches.isEmpty) return null;
+    if (matches.length == 1) return matches.first;
+
+    int totalAmount = 0;
+    int betCount = 0;
+    String? invoice;
+    for (final g in matches) {
+      totalAmount += (g['total_amount'] as int? ?? 0);
+      betCount += (g['bet_count'] as int? ?? 0);
+      final inv = g['invoice_number'] as String? ?? '';
+      if (inv.isNotEmpty) invoice ??= inv;
     }
+    final merged = Map<String, dynamic>.from(matches.first);
+    merged['total_amount'] = totalAmount;
+    merged['bet_count'] = betCount;
+    if (invoice != null) merged['invoice_number'] = invoice;
+    return merged;
   }
 
   /// Calculate totals from individual bets (fallback)
@@ -4877,26 +4994,31 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
                       final groupBets = entry.value;
                       final firstBet = groupBets.first;
                       final customerName =
-                          firstBet['customer_name'] as String? ?? '';
+                          (firstBet['customer_name'] as String? ?? '').trim();
                       final lotteryTime =
-                          firstBet['lottery_time'] as String? ?? '';
+                          (firstBet['lottery_time'] as String? ?? '').trim();
 
                       // Get group summary from table (pre-calculated)
                       final groupSummary = _getGroupSummary(
                         customerName,
                         lotteryTime,
                       );
+                      final displayInvoice =
+                          (firstBet['invoice_number'] as String? ?? '')
+                              .trim()
+                              .isNotEmpty
+                          ? (firstBet['invoice_number'] as String? ?? '')
+                          : (groupSummary?['invoice_number'] as String? ?? '');
 
                       // Calculate totals from individual bets (we need breakdown by pending/paid)
                       final totals = _calculateGroupTotals(groupBets);
                       final pendingTotal = totals['pending_total'] ?? 0;
                       final paidTotal = totals['paid_total'] ?? 0;
 
-                      // Use total_amount from summary table if available (pre-calculated),
-                      // otherwise use calculated total
-                      final totalAmount = groupSummary != null
-                          ? (groupSummary['total_amount'] as int? ?? 0)
-                          : (totals['total'] ?? 0);
+                      // Always use grouped rows total here. We now separate cards by
+                      // invoice as well, while bet_groups_summary may still aggregate by
+                      // customer/time only.
+                      final totalAmount = totals['total'] ?? 0;
 
                       // Mark for payment status
                       final hasPending = pendingTotal > 0;
@@ -4905,7 +5027,10 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
                           : Colors.green;
 
                       // Group key for selection
-                      final groupKey = '${customerName}_$lotteryTime';
+                      final groupKey = _groupKeyFromBetMap(
+                        firstBet,
+                        fallbackLotteryTime: widget.lotteryTime,
+                      );
                       final isSelected = _selectedGroups.contains(groupKey);
                       final isExpanded = _expandedGroups.contains(groupKey);
 
@@ -4972,16 +5097,10 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
                                             Expanded(
                                               child: Row(
                                                 children: [
-                                                  // Invoice number from group summary
-                                                  if (groupSummary != null &&
-                                                      (groupSummary['invoice_number']
-                                                                  as String? ??
-                                                              '')
-                                                          .isNotEmpty) ...[
+                                                  // Invoice number
+                                                  if (displayInvoice.isNotEmpty) ...[
                                                     Text(
-                                                      groupSummary['invoice_number']
-                                                              as String? ??
-                                                          '',
+                                                      displayInvoice,
                                                       style: const TextStyle(
                                                         fontSize: 13,
                                                         fontWeight:
@@ -5084,7 +5203,9 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
                           ),
                           // Individual bets list (when expanded)
                           if (isExpanded) ...[
-                            ...groupBets.map((bet) {
+                            ...groupBets.asMap().entries.map((entry) {
+                              final rowNo = entry.key + 1;
+                              final bet = entry.value;
                               final betId = bet['id'] as int?;
                               final source = bet['source'] as String? ?? '';
                               final isPending = source == 'pending_bets';
@@ -5099,7 +5220,9 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
 
                               if (betId == null) return const SizedBox.shrink();
 
-                              return Container(
+                              return Padding(
+                                padding: const EdgeInsets.only(left: 12),
+                                child: Container(
                                 margin: const EdgeInsets.only(bottom: 8),
                                 padding: const EdgeInsets.all(12),
                                 decoration: BoxDecoration(
@@ -5126,6 +5249,18 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
                                       children: [
                                         Row(
                                           children: [
+                                            SizedBox(
+                                              width: 28,
+                                              child: Text(
+                                                '$rowNo',
+                                                textAlign: TextAlign.center,
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: Colors.grey.shade600,
+                                                ),
+                                              ),
+                                            ),
                                             Checkbox(
                                               value: isBetSelected,
                                               onChanged: (value) =>
@@ -5281,6 +5416,7 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
                                     ],
                                   ],
                                 ),
+                              ),
                               );
                             }).toList(),
                           ],

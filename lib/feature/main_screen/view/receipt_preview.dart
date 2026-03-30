@@ -337,6 +337,14 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
           child: const Row(
             children: [
               Expanded(
+                flex: 1,
+                child: Text(
+                  'No',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                ),
+              ),
+              Expanded(
                 flex: 3,
                 child: Text(
                   'លេខភ្នាល់',
@@ -400,6 +408,14 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
             ),
             child: Row(
               children: [
+                Expanded(
+                  flex: 1,
+                  child: Text(
+                    '${index + 1}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                ),
                 Expanded(
                   flex: 3,
                   child: Text(

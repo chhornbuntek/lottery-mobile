@@ -122,6 +122,8 @@ class BetsApi {
     required int multiplier,
     required String billType,
     required List<String> selectedConditions,
+    String? invoiceNumber,
+    String? groupToken,
   }) async {
     try {
       final user = _supabase.auth.currentUser;
@@ -138,8 +140,9 @@ class BetsApi {
 
       final adminId = profileResponse['admin_id'] as String?;
 
-      // Generate invoice number
-      final invoiceNumber = await _generateInvoiceNumber();
+      // pending_bets has a unique constraint on invoice per user/date.
+      // Always generate a fresh invoice number for each inserted bet row.
+      final resolvedInvoiceNumber = await _generateInvoiceNumber();
 
       final response = await _supabase
           .from('pending_bets')
@@ -159,7 +162,9 @@ class BetsApi {
             )[0], // Current date
             'user_id': user.id,
             'admin_id': adminId, // Auto-populate admin_id
-            'invoice_number': invoiceNumber, // Auto-generate invoice number
+            'invoice_number': resolvedInvoiceNumber,
+            if (groupToken != null && groupToken.trim().isNotEmpty)
+              'group_token': groupToken.trim(),
           })
           .select()
           .single();

@@ -499,6 +499,17 @@ class _BettingScreenState extends State<BettingScreen> {
     String lotteryTimeName,
     List<String> selectedConditions,
   ) async {
+    // Safety gate: never allow betting after the draw time in the lottery name.
+    // This protects against missing/misconfigured closing_time_posts data.
+    final nowForHardCutoff = TimeOfDay.fromDateTime(DateTime.now());
+    final currentMinutesForHardCutoff =
+        nowForHardCutoff.hour * 60 + nowForHardCutoff.minute;
+    final drawTimeMinutes = _extractTimeFromLotteryTimeName(lotteryTimeName);
+    if (drawTimeMinutes != null &&
+        currentMinutesForHardCutoff >= drawTimeMinutes) {
+      return List<String>.from(selectedConditions.toSet());
+    }
+
     try {
       // Get all closing times
       List<ClosingTime> closingTimes =
@@ -698,9 +709,44 @@ class _BettingScreenState extends State<BettingScreen> {
       return closedPosts;
     } catch (e) {
       print('Error checking closed posts: $e');
-      // If error, allow betting (fail open)
+      // If close-check data fails, keep hard-cutoff behavior by lottery time.
+      if (drawTimeMinutes != null &&
+          currentMinutesForHardCutoff >= drawTimeMinutes) {
+        return List<String>.from(selectedConditions.toSet());
+      }
+      // Otherwise preserve existing behavior.
       return [];
     }
+  }
+
+  bool _isLotteryTimePastCutoff(String lotteryTimeName) {
+    final drawTimeMinutes = _extractTimeFromLotteryTimeName(lotteryTimeName);
+    if (drawTimeMinutes == null) return false;
+    final now = TimeOfDay.fromDateTime(DateTime.now());
+    final currentMinutes = now.hour * 60 + now.minute;
+    return currentMinutes >= drawTimeMinutes;
+  }
+
+  void _showTopErrorSnackBar(String message) {
+    final messenger = ScaffoldMessenger.of(context);
+    final media = MediaQuery.of(context);
+    final topOffset = media.padding.top + kToolbarHeight + 12;
+    const estimatedSnackBarHeight = 56.0;
+    final bottomMargin =
+        (media.size.height - topOffset - estimatedSnackBarHeight).clamp(
+          12.0,
+          media.size.height,
+        );
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        duration: const Duration(seconds: 4),
+        behavior: SnackBarBehavior.floating,
+        margin: EdgeInsets.fromLTRB(12, 0, 12, bottomMargin),
+      ),
+    );
   }
 
   Future<void> _addNewBet() async {
@@ -764,6 +810,12 @@ class _BettingScreenState extends State<BettingScreen> {
         backgroundColor: Colors.red,
         colorText: Colors.white,
       );
+      return;
+    }
+
+    // Hard stop: lottery time itself already passed.
+    if (_isLotteryTimePastCutoff(_selectedLotteryTime!.timeName)) {
+      _showTopErrorSnackBar('ម៉ោង ${_selectedLotteryTime!.timeName} បានបិទហើយ');
       return;
     }
 
@@ -2975,6 +3027,15 @@ class _BettingScreenState extends State<BettingScreen> {
       final lotteryTimeId = _selectedLotteryTime?.id;
       final lotteryTimeName = _selectedLotteryTime?.timeName;
 
+      // Hard stop: lottery time itself already passed.
+      if (_isLotteryTimePastCutoff(lotteryTimeName ?? '')) {
+        _showTopErrorSnackBar('ម៉ោង ${lotteryTimeName ?? ''} បានបិទហើយ');
+        setState(() {
+          _isSaving = false;
+        });
+        return;
+      }
+
       // Check if any selected posts are closed (same as _addNewBet)
       List<String> closedPosts = await _checkClosedPosts(
         lotteryTimeName ?? '',
@@ -3333,6 +3394,12 @@ class _BettingScreenState extends State<BettingScreen> {
         backgroundColor: Colors.red,
         colorText: Colors.white,
       );
+      return;
+    }
+
+    // Hard stop: lottery time itself already passed.
+    if (_isLotteryTimePastCutoff(groupLotteryTime)) {
+      _showTopErrorSnackBar('ម៉ោង $groupLotteryTime បានបិទហើយ');
       return;
     }
 

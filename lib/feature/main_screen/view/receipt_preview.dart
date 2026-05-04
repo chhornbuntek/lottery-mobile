@@ -8,6 +8,7 @@ import 'package:get/get.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:gal/gal.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../core/config.dart';
 import '../service/ភ្នាល់_service.dart';
 
 class ReceiptPreview extends StatefulWidget {
@@ -211,7 +212,7 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
         // Logo
         ClipOval(
           child: Image.asset(
-            'assets/logo2.png',
+            SupabaseConfig.receiptLogoAsset,
             width: 80,
             height: 80,
             fit: BoxFit.cover,

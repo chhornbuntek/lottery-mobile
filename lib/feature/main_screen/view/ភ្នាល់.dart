@@ -8,6 +8,10 @@ import 'receipt_preview.dart';
 
 // BetData class is now imported from service file
 
+/// TEMP testing: `true` skips all lottery close-time checks (add bet + pay flows).
+/// Set to `false` for production.
+const bool kBypassCloseTimeForTest = false;
+
 class BettingScreen extends StatefulWidget {
   const BettingScreen({super.key});
 
@@ -499,6 +503,10 @@ class _BettingScreenState extends State<BettingScreen> {
     String lotteryTimeName,
     List<String> selectedConditions,
   ) async {
+    if (kBypassCloseTimeForTest) {
+      return [];
+    }
+
     // Safety gate: never allow betting after the draw time in the lottery name.
     // This protects against missing/misconfigured closing_time_posts data.
     final nowForHardCutoff = TimeOfDay.fromDateTime(DateTime.now());
@@ -720,6 +728,9 @@ class _BettingScreenState extends State<BettingScreen> {
   }
 
   bool _isLotteryTimePastCutoff(String lotteryTimeName) {
+    if (kBypassCloseTimeForTest) {
+      return false;
+    }
     final drawTimeMinutes = _extractTimeFromLotteryTimeName(lotteryTimeName);
     if (drawTimeMinutes == null) return false;
     final now = TimeOfDay.fromDateTime(DateTime.now());
@@ -3604,6 +3615,9 @@ class _BettingScreenState extends State<BettingScreen> {
   /// Returns a message describing which lottery is closed, or null if all are open
   Future<String?> _checkIfBettingClosed(List<dynamic> bets) async {
     if (bets.isEmpty) return null;
+    if (kBypassCloseTimeForTest) {
+      return null;
+    }
 
     try {
       final Set<String> lotteryTimesToCheck = {};
@@ -4341,6 +4355,9 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
   /// Returns a message describing which lottery is closed, or null if all are open
   Future<String?> _checkIfBettingClosed(List<dynamic> bets) async {
     if (bets.isEmpty) return null;
+    if (kBypassCloseTimeForTest) {
+      return null;
+    }
 
     try {
       final Set<String> lotteryTimesToCheck = {};

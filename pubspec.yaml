@@ -57,6 +57,10 @@ dependencies:
   # Local notifications for foreground popups
   flutter_local_notifications: ^18.0.1
 
+  # Must be a runtime dependency so Android release includes the native plugin
+  # (dev-only plugins can fail compile: package flutter_native_splash does not exist).
+  flutter_native_splash: ^2.3.11
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -70,9 +74,6 @@ dev_dependencies:
   
   # For generating app icons
   flutter_launcher_icons: ^0.13.1
-  
-  # For generating splash screen
-  flutter_native_splash: ^2.3.11
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

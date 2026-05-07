@@ -8,10 +8,6 @@ import 'receipt_preview.dart';
 
 // BetData class is now imported from service file
 
-/// TEMP testing: `true` skips all lottery close-time checks (add bet + pay flows).
-/// Set to `false` for production.
-const bool kBypassCloseTimeForTest = false;
-
 class BettingScreen extends StatefulWidget {
   const BettingScreen({super.key});
 
@@ -503,10 +499,6 @@ class _BettingScreenState extends State<BettingScreen> {
     String lotteryTimeName,
     List<String> selectedConditions,
   ) async {
-    if (kBypassCloseTimeForTest) {
-      return [];
-    }
-
     // Safety gate: never allow betting after the draw time in the lottery name.
     // This protects against missing/misconfigured closing_time_posts data.
     final nowForHardCutoff = TimeOfDay.fromDateTime(DateTime.now());
@@ -728,9 +720,6 @@ class _BettingScreenState extends State<BettingScreen> {
   }
 
   bool _isLotteryTimePastCutoff(String lotteryTimeName) {
-    if (kBypassCloseTimeForTest) {
-      return false;
-    }
     final drawTimeMinutes = _extractTimeFromLotteryTimeName(lotteryTimeName);
     if (drawTimeMinutes == null) return false;
     final now = TimeOfDay.fromDateTime(DateTime.now());
@@ -1105,13 +1094,7 @@ class _BettingScreenState extends State<BettingScreen> {
       // Check if betting is closed for any of the bets to edit
       final closedMessage = await _checkIfBettingClosed(_betsToEdit);
       if (closedMessage != null) {
-        Get.snackbar(
-          'កំហុស',
-          closedMessage,
-          backgroundColor: Colors.red,
-          colorText: Colors.white,
-          duration: const Duration(seconds: 4),
-        );
+        _showTopErrorSnackBar(closedMessage);
         return;
       }
 
@@ -1204,13 +1187,7 @@ class _BettingScreenState extends State<BettingScreen> {
     // Check if betting is closed for any of the bets in _betList
     final closedMessage = await _checkIfBettingClosed(_betList);
     if (closedMessage != null) {
-      Get.snackbar(
-        'កំហុស',
-        closedMessage,
-        backgroundColor: Colors.red,
-        colorText: Colors.white,
-        duration: const Duration(seconds: 4),
-      );
+      _showTopErrorSnackBar(closedMessage);
       return;
     }
 
@@ -2839,6 +2816,13 @@ class _BettingScreenState extends State<BettingScreen> {
   /// Enter edit mode with selected bets (store all bets, load first into form)
   Future<void> _enterEditMode(List<Map<String, dynamic>> bets) async {
     if (bets.isEmpty) return;
+    final closedMessage = await _checkIfBettingClosed(bets);
+    if (closedMessage != null) {
+      _showTopErrorSnackBar(
+        closedMessage.replaceAll('មិនអាចបង់ប្រាក់បានទេ', 'មិនអាចកែប្រែបានទេ'),
+      );
+      return;
+    }
 
     setState(() {
       _isEditMode = true;
@@ -3056,13 +3040,7 @@ class _BettingScreenState extends State<BettingScreen> {
       if (closedPosts.isNotEmpty) {
         // Show alert for each closed post
         String closedPostsStr = closedPosts.join(', ');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('បិទហើយ - ឥឡូវនេះបិទសម្រាប់ post $closedPostsStr'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 4),
-          ),
-        );
+        _showTopErrorSnackBar('បិទហើយ - ឥឡូវនេះបិទសម្រាប់ post $closedPostsStr');
         setState(() {
           _isSaving = false;
         });
@@ -3615,9 +3593,6 @@ class _BettingScreenState extends State<BettingScreen> {
   /// Returns a message describing which lottery is closed, or null if all are open
   Future<String?> _checkIfBettingClosed(List<dynamic> bets) async {
     if (bets.isEmpty) return null;
-    if (kBypassCloseTimeForTest) {
-      return null;
-    }
 
     try {
       final Set<String> lotteryTimesToCheck = {};
@@ -3648,7 +3623,9 @@ class _BettingScreenState extends State<BettingScreen> {
         }
       }
 
-      if (lotteryTimesToCheck.isEmpty) return null;
+      if (lotteryTimesToCheck.isEmpty) {
+        return 'មិនអាចផ្ទៀងផ្ទាត់ម៉ោងឆ្នោតបានទេ! សូមពិនិត្យទិន្នន័យ lottery_time មុនបង់ប្រាក់';
+      }
 
       final now = DateTime.now();
       final currentTime = TimeOfDay.fromDateTime(now);
@@ -3683,6 +3660,15 @@ class _BettingScreenState extends State<BettingScreen> {
       }
 
       for (var lotteryTimeName in lotteryTimesToCheck) {
+        // Hard cutoff by lottery time label (e.g. 6:30PM) even if closing tables are missing.
+        final lotteryMinutes = _extractTimeFromLotteryTimeName(lotteryTimeName);
+        if (lotteryMinutes == null) {
+          return 'មិនអាចបកស្រាយម៉ោងឆ្នោត $lotteryTimeName បានទេ! មិនអាចបង់ប្រាក់បានទេ';
+        }
+        if (lotteryMinutes != null && currentMinutes >= lotteryMinutes) {
+          return 'ម៉ោងឆ្នោត $lotteryTimeName បានបិទហើយ! មិនអាចបង់ប្រាក់បានទេ';
+        }
+
         final closingTime = closingTimes.firstWhere(
           (ct) => ct.timeName == lotteryTimeName,
           orElse: () => ClosingTime(
@@ -4128,6 +4114,28 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
     return betNumbers.length * amountPerNumber;
   }
 
+  void _showTopErrorSnackBar(String message) {
+    final messenger = ScaffoldMessenger.of(context);
+    final media = MediaQuery.of(context);
+    final topOffset = media.padding.top + kToolbarHeight + 12;
+    const estimatedSnackBarHeight = 56.0;
+    final bottomMargin =
+        (media.size.height - topOffset - estimatedSnackBarHeight).clamp(
+          12.0,
+          media.size.height,
+        );
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        duration: const Duration(seconds: 4),
+        behavior: SnackBarBehavior.floating,
+        margin: EdgeInsets.fromLTRB(12, 0, 12, bottomMargin),
+      ),
+    );
+  }
+
   /// Save edited bets
   Future<void> _saveEditedBets() async {
     if (_editingBetIds.isEmpty) {
@@ -4355,9 +4363,6 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
   /// Returns a message describing which lottery is closed, or null if all are open
   Future<String?> _checkIfBettingClosed(List<dynamic> bets) async {
     if (bets.isEmpty) return null;
-    if (kBypassCloseTimeForTest) {
-      return null;
-    }
 
     try {
       final Set<String> lotteryTimesToCheck = {};
@@ -4388,7 +4393,9 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
         }
       }
 
-      if (lotteryTimesToCheck.isEmpty) return null;
+      if (lotteryTimesToCheck.isEmpty) {
+        return 'មិនអាចផ្ទៀងផ្ទាត់ម៉ោងឆ្នោតបានទេ! សូមពិនិត្យទិន្នន័យ lottery_time មុនបង់ប្រាក់';
+      }
 
       final now = DateTime.now();
       final currentTime = TimeOfDay.fromDateTime(now);
@@ -4423,6 +4430,15 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
       }
 
       for (var lotteryTimeName in lotteryTimesToCheck) {
+        // Hard cutoff by lottery time label (e.g. 6:30PM) even if closing tables are missing.
+        final lotteryMinutes = _extractTimeFromLotteryTimeName(lotteryTimeName);
+        if (lotteryMinutes == null) {
+          return 'មិនអាចបកស្រាយម៉ោងឆ្នោត $lotteryTimeName បានទេ! មិនអាចបង់ប្រាក់បានទេ';
+        }
+        if (lotteryMinutes != null && currentMinutes >= lotteryMinutes) {
+          return 'ម៉ោងឆ្នោត $lotteryTimeName បានបិទហើយ! មិនអាចបង់ប្រាក់បានទេ';
+        }
+
         final closingTime = closingTimes.firstWhere(
           (ct) => ct.timeName == lotteryTimeName,
           orElse: () => ClosingTime(
@@ -4523,6 +4539,7 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
 
     try {
       final groupedBets = _groupBetsByCustomerTime();
+      final List<dynamic> betsToCheck = [];
       List<BetData> allBetsToShow = [];
       String? customerName;
       String? lotteryTime;
@@ -4532,6 +4549,7 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
       for (var selectedKey in _selectedGroups) {
         final groupBets = groupedBets[selectedKey] ?? [];
         if (groupBets.isEmpty) continue;
+        betsToCheck.addAll(groupBets);
 
         // Get customer name and lottery time from first bet
         if (customerName == null || lotteryTime == null) {
@@ -4550,6 +4568,13 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
             print('Error converting bet to BetData: $e');
           }
         }
+      }
+
+      // Use same close-time guard as bet/pay/edit before allowing print preview.
+      final closedMessage = await _checkIfBettingClosed(betsToCheck);
+      if (closedMessage != null) {
+        _showTopErrorSnackBar(closedMessage);
+        return;
       }
 
       if (allBetsToShow.isEmpty) {
@@ -4919,13 +4944,7 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
 
     final closedMessage = await _checkIfBettingClosed(betsToCheck);
     if (closedMessage != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(closedMessage),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 4),
-        ),
-      );
+      _showTopErrorSnackBar(closedMessage);
       return;
     }
 
@@ -5751,7 +5770,7 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
                             child: ElevatedButton(
                               onPressed: _isProcessing
                                   ? null
-                                  : () {
+                                  : () async {
                                       // Get only pending bets from selected group (unpaid only)
                                       final groupedBets =
                                           _groupBetsByCustomerTime();
@@ -5775,6 +5794,21 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
                                               'គ្មានទិន្នន័យដើម្បីកែប្រែ',
                                             ),
                                             backgroundColor: Colors.orange,
+                                          ),
+                                        );
+                                        return;
+                                      }
+
+                                      // Do not allow opening edit mode after close time.
+                                      final closedMessage =
+                                          await _checkIfBettingClosed(
+                                            betsToEdit,
+                                          );
+                                      if (closedMessage != null) {
+                                        _showTopErrorSnackBar(
+                                          closedMessage.replaceAll(
+                                            'មិនអាចបង់ប្រាក់បានទេ',
+                                            'មិនអាចកែប្រែបានទេ',
                                           ),
                                         );
                                         return;

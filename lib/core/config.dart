@@ -2,7 +2,7 @@
 /// (`branch1`, `branch2`, or `branch3`).
 class SupabaseConfig {
   /// Set to `branch1`, `branch2`, or `branch3` — no build flags needed.
-  static const String activeBranch = 'branch3';
+  static const String activeBranch = 'branch2';
 
   static String get supabaseUrl {
     switch (activeBranch) {

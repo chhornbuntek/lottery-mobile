@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import '../../../core/config.dart';
 import '../service/ភ្នាល់_service.dart';
 import '../api/ភ្នាល់_api.dart';
 import '../service/ម៉ោងបិទ_service.dart';
@@ -367,6 +368,11 @@ class _BettingScreenState extends State<BettingScreen> {
     });
   }
 
+  /// Keypad "លុប": clear only the currently active input field.
+  void _onDeleteKeypadPressed() {
+    _onClearPressed();
+  }
+
   void _onBackspacePressed() {
     setState(() {
       switch (_focusedFieldIndex) {
@@ -494,237 +500,12 @@ class _BettingScreenState extends State<BettingScreen> {
     return total;
   }
 
-  /// Check if any selected posts are currently closed
+  /// Check if any selected posts are currently closed (DB: closing_time + closing_time_posts).
   Future<List<String>> _checkClosedPosts(
     String lotteryTimeName,
     List<String> selectedConditions,
   ) async {
-    // Safety gate: never allow betting after the draw time in the lottery name.
-    // This protects against missing/misconfigured closing_time_posts data.
-    final nowForHardCutoff = TimeOfDay.fromDateTime(DateTime.now());
-    final currentMinutesForHardCutoff =
-        nowForHardCutoff.hour * 60 + nowForHardCutoff.minute;
-    final drawTimeMinutes = _extractTimeFromLotteryTimeName(lotteryTimeName);
-    if (drawTimeMinutes != null &&
-        currentMinutesForHardCutoff >= drawTimeMinutes) {
-      return List<String>.from(selectedConditions.toSet());
-    }
-
-    try {
-      // Get all closing times
-      List<ClosingTime> closingTimes =
-          await ClosingTimeService.getAllClosingTimes();
-
-      // Find closing time for the selected lottery time
-      ClosingTime? closingTime = closingTimes.firstWhere(
-        (ct) => ct.timeName == lotteryTimeName,
-        orElse: () => ClosingTime(
-          id: 0,
-          timeName: '',
-          startTime: '',
-          endTime: '',
-          vipEnabled: false,
-          posts: [],
-        ),
-      );
-
-      // If no closing time found for this lottery time, allow betting
-      if (closingTime.id == 0 || closingTime.posts.isEmpty) {
-        return [];
-      }
-
-      // Get current time and day
-      DateTime now = DateTime.now();
-      int dayOfWeek = now.weekday; // 1 = Monday, 7 = Sunday
-      TimeOfDay currentTime = TimeOfDay.fromDateTime(now);
-
-      // Get day name
-      String dayName = '';
-      switch (dayOfWeek) {
-        case 1:
-          dayName = 'monday';
-          break;
-        case 2:
-          dayName = 'tuesday';
-          break;
-        case 3:
-          dayName = 'wednesday';
-          break;
-        case 4:
-          dayName = 'thursday';
-          break;
-        case 5:
-          dayName = 'friday';
-          break;
-        case 6:
-          dayName = 'saturday';
-          break;
-        case 7:
-          dayName = 'sunday';
-          break;
-      }
-
-      // Convert current time to minutes for comparison
-      int currentMinutes = currentTime.hour * 60 + currentTime.minute;
-
-      // Parse end_time from closing_time table (general end time for lottery time)
-      List<String> endTimeParts = closingTime.endTime.split(':');
-      int endHour = int.tryParse(endTimeParts[0]) ?? 0;
-      int endMinute = int.tryParse(endTimeParts[1]) ?? 0;
-      int endMinutes = endHour * 60 + endMinute;
-
-      List<String> closedPosts = [];
-
-      // Check each selected condition
-      for (String condition in selectedConditions) {
-        // Debug: Log available posts for this lottery time
-        print(
-          '🔍 Checking condition "$condition" for lottery time "$lotteryTimeName"',
-        );
-        print(
-          '📋 Available posts: ${closingTime.posts.map((p) => p.postId).join(", ")}',
-        );
-
-        // Find post for this condition
-        ClosingTimePost? post = closingTime.posts.firstWhere(
-          (p) => p.postId.toUpperCase() == condition.toUpperCase(),
-          orElse: () => ClosingTimePost(
-            id: 0,
-            postId: '',
-            closingTimeId: null,
-            vip: false,
-            hasActions: false,
-          ),
-        );
-
-        // Debug: Log if post was found
-        if (post.id == 0) {
-          print(
-            '⚠️ Post "$condition" NOT FOUND for lottery time "$lotteryTimeName" - allowing betting (fail open)',
-          );
-        } else {
-          print('✅ Post "$condition" found (ID: ${post.id})');
-        }
-
-        // If post found, check if it's closed
-        if (post.id != 0) {
-          // Get day-specific time from closing_time_posts (monday, tuesday, etc.)
-          // This is when betting starts/closes for this post on this day
-          String? daySpecificTimeStr;
-          switch (dayName) {
-            case 'monday':
-              daySpecificTimeStr = post.monday;
-              break;
-            case 'tuesday':
-              daySpecificTimeStr = post.tuesday;
-              break;
-            case 'wednesday':
-              daySpecificTimeStr = post.wednesday;
-              break;
-            case 'thursday':
-              daySpecificTimeStr = post.thursday;
-              break;
-            case 'friday':
-              daySpecificTimeStr = post.friday;
-              break;
-            case 'saturday':
-              daySpecificTimeStr = post.saturday;
-              break;
-            case 'sunday':
-              daySpecificTimeStr = post.sunday;
-              break;
-          }
-
-          if (daySpecificTimeStr != null && daySpecificTimeStr.isNotEmpty) {
-            // Parse day-specific time from closing_time_posts (format: HH:MM:SS or HH:MM)
-            // This time represents when betting closes for this post on this day
-            List<String> timeParts = daySpecificTimeStr.split(':');
-            if (timeParts.length >= 2) {
-              int daySpecificHour = int.tryParse(timeParts[0]) ?? 0;
-              int daySpecificMinute = int.tryParse(timeParts[1]) ?? 0;
-              int daySpecificMinutes = daySpecificHour * 60 + daySpecificMinute;
-
-              // Debug logging
-              print(
-                '🔍 Checking post $condition: currentTime=${currentTime.hour}:${currentTime.minute} (${currentMinutes}min), closingTime=$daySpecificTimeStr (${daySpecificMinutes}min), endTime=${closingTime.endTime} (${endMinutes}min)',
-              );
-
-              // Check if current time is before day-specific start time (too early to bet)
-              // Use day-specific time from closing_time_posts as the closing time for this post
-              bool isBeforeStart = false;
-              if (endMinutes < daySpecificMinutes) {
-                // End time is on next day (e.g., 05:00 < 17:20)
-                // Betting window: end_time (05:00) to day-specific closing time (17:20)
-                // Too early if current time <= end time (before betting window starts)
-                // OR if current time >= day-specific closing time (after betting window ends)
-                // Actually, we should only check "too early" - which is before the betting window starts
-                // The betting window is from end_time (05:00) to day-specific closing time (17:20)
-                isBeforeStart = currentMinutes <= endMinutes;
-              } else {
-                // End time is on same day (e.g., 18:00 > 17:20)
-                // Betting window: 00:00 to day-specific closing time (17:20)
-                // Too early if current time < day-specific closing time (but this doesn't make sense)
-                // Actually, if end_time is on same day and > day-specific, the logic is different
-                // For now, assume betting is allowed from 00:00 to day-specific closing time
-                isBeforeStart =
-                    false; // No "too early" restriction when end_time is on same day
-              }
-
-              // Check if current time is after day-specific closing time
-              // Post closes at the day-specific time (e.g., monday = 17:20 for this post)
-              // After closing time, betting is blocked until end_time from closing_time table
-              bool isAfterClosing = false;
-              if (endMinutes < daySpecificMinutes) {
-                // End time is on next day (e.g., 05:00 < 17:20)
-                // Betting window: end_time (05:00) to day-specific closing time (17:20)
-                // Post is closed if current time >= day-specific closing time
-                // OR if current time <= end time (before betting window starts)
-                // But we already handle "before start" above, so here we only check "after closing"
-                isAfterClosing = currentMinutes >= daySpecificMinutes;
-              } else {
-                // End time is on same day (e.g., 18:00 > 17:20)
-                // Betting window: 00:00 to day-specific closing time (17:20)
-                // Post is closed if current time >= day-specific closing time AND current time <= end time
-                isAfterClosing =
-                    currentMinutes >= daySpecificMinutes &&
-                    currentMinutes <= endMinutes;
-              }
-
-              // Post is closed if:
-              // 1. Too early (before day-specific start time from closing_time_posts)
-              // 2. After closing time (after day-specific closing time from closing_time_posts)
-              if (isBeforeStart || isAfterClosing) {
-                print(
-                  '❌ Post $condition is CLOSED: isBeforeStart=$isBeforeStart, isAfterClosing=$isAfterClosing',
-                );
-                closedPosts.add(condition);
-              } else {
-                print('✅ Post $condition is OPEN');
-              }
-            }
-          }
-        }
-      }
-
-      return closedPosts;
-    } catch (e) {
-      print('Error checking closed posts: $e');
-      // If close-check data fails, keep hard-cutoff behavior by lottery time.
-      if (drawTimeMinutes != null &&
-          currentMinutesForHardCutoff >= drawTimeMinutes) {
-        return List<String>.from(selectedConditions.toSet());
-      }
-      // Otherwise preserve existing behavior.
-      return [];
-    }
-  }
-
-  bool _isLotteryTimePastCutoff(String lotteryTimeName) {
-    final drawTimeMinutes = _extractTimeFromLotteryTimeName(lotteryTimeName);
-    if (drawTimeMinutes == null) return false;
-    final now = TimeOfDay.fromDateTime(DateTime.now());
-    final currentMinutes = now.hour * 60 + now.minute;
-    return currentMinutes >= drawTimeMinutes;
+    return checkClosedPostsFromDb(lotteryTimeName, selectedConditions);
   }
 
   void _showTopErrorSnackBar(String message) {
@@ -747,6 +528,17 @@ class _BettingScreenState extends State<BettingScreen> {
         margin: EdgeInsets.fromLTRB(12, 0, 12, bottomMargin),
       ),
     );
+  }
+
+  void _showClosedPostsSnackBar(
+    List<String> closedPosts, {
+    String? lotteryTimeName,
+  }) {
+    if (closedPosts.isEmpty) return;
+    final posts = closedPosts.join(', ');
+    final time = lotteryTimeName ?? _selectedLotteryTime?.timeName ?? '';
+    final timePart = time.isNotEmpty ? ' ($time)' : '';
+    _showTopErrorSnackBar('បិទហើយ$timePart — ឥឡូវនេះបិទសម្រាប់ post $posts');
   }
 
   Future<void> _addNewBet() async {
@@ -813,28 +605,14 @@ class _BettingScreenState extends State<BettingScreen> {
       return;
     }
 
-    // Hard stop: lottery time itself already passed.
-    if (_isLotteryTimePastCutoff(_selectedLotteryTime!.timeName)) {
-      _showTopErrorSnackBar('ម៉ោង ${_selectedLotteryTime!.timeName} បានបិទហើយ');
-      return;
-    }
-
-    // Check if any selected posts are closed
+    // Check if any selected posts are closed (DB only)
     List<String> closedPosts = await _checkClosedPosts(
       _selectedLotteryTime!.timeName,
       filteredConditions,
     );
 
     if (closedPosts.isNotEmpty) {
-      // Show alert for each closed post
-      String closedPostsStr = closedPosts.join(', ');
-      Get.snackbar(
-        'បិទហើយ',
-        'ឥឡូវនេះបិទសម្រាប់ post $closedPostsStr',
-        backgroundColor: Colors.red,
-        colorText: Colors.white,
-        duration: const Duration(seconds: 4),
-      );
+      _showClosedPostsSnackBar(closedPosts);
       return;
     }
 
@@ -2129,17 +1907,11 @@ class _BettingScreenState extends State<BettingScreen> {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: Checkbox(
-                      value: _checkboxes['A'] ?? false,
-                      onChanged: (value) {
-                        _handleCheckboxChange('A', value ?? false);
-                      },
-                      activeColor: Colors.orange,
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
+                  _buildPostCheckbox(
+                    value: _checkboxes['A'] ?? false,
+                    onChanged: (value) {
+                      _handleCheckboxChange('A', value ?? false);
+                    },
                   ),
                   const SizedBox(width: 6),
                   const Text(
@@ -2156,6 +1928,31 @@ class _BettingScreenState extends State<BettingScreen> {
           ),
         ],
       ],
+    );
+  }
+
+  /// Post-condition checkboxes — a bit larger than default for easier taps.
+  Widget _buildPostCheckbox({
+    required bool value,
+    required ValueChanged<bool?> onChanged,
+  }) {
+    const double scale = 1.22;
+    return SizedBox(
+      width: 25,
+      height: 25,
+      child: Center(
+        child: Transform.scale(
+          scale: scale,
+          alignment: Alignment.center,
+          child: Checkbox(
+            value: value,
+            onChanged: onChanged,
+            activeColor: Colors.orange,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            visualDensity: VisualDensity.compact,
+          ),
+        ),
+      ),
     );
   }
 
@@ -2226,19 +2023,13 @@ class _BettingScreenState extends State<BettingScreen> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              SizedBox(
-                width: 20,
-                height: 20,
-                child: Checkbox(
-                  value: _checkboxes[label] ?? false,
-                  onChanged: (value) {
-                    _handleCheckboxChange(label, value ?? false);
-                  },
-                  activeColor: Colors.orange,
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
+              _buildPostCheckbox(
+                value: _checkboxes[label] ?? false,
+                onChanged: (value) {
+                  _handleCheckboxChange(label, value ?? false);
+                },
               ),
-              const SizedBox(width: 4),
+              const SizedBox(width: 6),
               Expanded(
                 child: Text(
                   label,
@@ -2305,10 +2096,7 @@ class _BettingScreenState extends State<BettingScreen> {
               Icons.delete,
               'លុប',
               Colors.red,
-              onPressed: () {
-                // Handle delete functionality
-                debugPrint('Delete pressed');
-              },
+              onPressed: _onDeleteKeypadPressed,
             ),
             _buildNumberButton('1', onPressed: () => _onKeypadPressed('1')),
             _buildNumberButton('2', onPressed: () => _onKeypadPressed('2')),
@@ -2375,7 +2163,7 @@ class _BettingScreenState extends State<BettingScreen> {
                         if (filteredCurrent.isNotEmpty) {
                           // Add new bet to the same group (same customer/time)
                           await _addBetToEditGroup();
-                          _focusAfterReturnKey();
+                          _focusBetNumberField();
                           return;
                         }
                       }
@@ -2412,8 +2200,10 @@ class _BettingScreenState extends State<BettingScreen> {
                         // Keep customer name, time, and conditions for easy adding more numbers
                         if (_betList.length > betListLengthBefore) {
                           _clearFormPartial();
+                          _focusBetNumberField();
+                        } else {
+                          _focusAfterReturnKey();
                         }
-                        _focusAfterReturnKey();
                         return;
                       }
                     }
@@ -3022,25 +2812,17 @@ class _BettingScreenState extends State<BettingScreen> {
       final lotteryTimeId = _selectedLotteryTime?.id;
       final lotteryTimeName = _selectedLotteryTime?.timeName;
 
-      // Hard stop: lottery time itself already passed.
-      if (_isLotteryTimePastCutoff(lotteryTimeName ?? '')) {
-        _showTopErrorSnackBar('ម៉ោង ${lotteryTimeName ?? ''} បានបិទហើយ');
-        setState(() {
-          _isSaving = false;
-        });
-        return;
-      }
-
-      // Check if any selected posts are closed (same as _addNewBet)
+      // Check if any selected posts are closed (DB only, same as _addNewBet)
       List<String> closedPosts = await _checkClosedPosts(
         lotteryTimeName ?? '',
         filteredConditions,
       );
 
       if (closedPosts.isNotEmpty) {
-        // Show alert for each closed post
-        String closedPostsStr = closedPosts.join(', ');
-        _showTopErrorSnackBar('បិទហើយ - ឥឡូវនេះបិទសម្រាប់ post $closedPostsStr');
+        final posts = closedPosts.join(', ');
+        _showTopErrorSnackBar(
+          'បិទហើយ (${lotteryTimeName ?? ''}) — ឥឡូវនេះបិទសម្រាប់ post $posts',
+        );
         setState(() {
           _isSaving = false;
         });
@@ -3386,27 +3168,14 @@ class _BettingScreenState extends State<BettingScreen> {
       return;
     }
 
-    // Hard stop: lottery time itself already passed.
-    if (_isLotteryTimePastCutoff(groupLotteryTime)) {
-      _showTopErrorSnackBar('ម៉ោង $groupLotteryTime បានបិទហើយ');
-      return;
-    }
-
-    // Check if any selected posts are closed
+    // Check if any selected posts are closed (DB only)
     List<String> closedPosts = await _checkClosedPosts(
       groupLotteryTime,
       filteredConditions,
     );
 
     if (closedPosts.isNotEmpty) {
-      String closedPostsStr = closedPosts.join(', ');
-      Get.snackbar(
-        'បិទហើយ',
-        'ឥឡូវនេះបិទសម្រាប់ post $closedPostsStr',
-        backgroundColor: Colors.red,
-        colorText: Colors.white,
-        duration: const Duration(seconds: 4),
-      );
+      _showClosedPostsSnackBar(closedPosts, lotteryTimeName: groupLotteryTime);
       return;
     }
 
@@ -3589,207 +3358,9 @@ class _BettingScreenState extends State<BettingScreen> {
     });
   }
 
-  /// Check if betting is closed for a list of bets
-  /// Returns a message describing which lottery is closed, or null if all are open
+  /// DB-only close check for pay / edit / cancel.
   Future<String?> _checkIfBettingClosed(List<dynamic> bets) async {
-    if (bets.isEmpty) return null;
-
-    try {
-      final Set<String> lotteryTimesToCheck = {};
-      final Map<String, Set<String>> postsByLotteryTime = {};
-
-      for (var bet in bets) {
-        String lotteryTime = '';
-        List<dynamic> selectedConditions = [];
-
-        if (bet is BetData) {
-          lotteryTime = bet.lotteryTime;
-          selectedConditions = bet.selectedConditions;
-        } else if (bet is Map<String, dynamic>) {
-          lotteryTime = bet['lottery_time'] as String? ?? '';
-          selectedConditions =
-              bet['selected_conditions'] as List<dynamic>? ?? [];
-        }
-
-        if (lotteryTime.isNotEmpty) {
-          lotteryTimesToCheck.add(lotteryTime);
-          postsByLotteryTime.putIfAbsent(lotteryTime, () => {});
-          for (var condition in selectedConditions) {
-            final conditionStr = condition.toString().toUpperCase();
-            if (conditionStr != '4P' && conditionStr != '7P') {
-              postsByLotteryTime[lotteryTime]!.add(conditionStr);
-            }
-          }
-        }
-      }
-
-      if (lotteryTimesToCheck.isEmpty) {
-        return 'មិនអាចផ្ទៀងផ្ទាត់ម៉ោងឆ្នោតបានទេ! សូមពិនិត្យទិន្នន័យ lottery_time មុនបង់ប្រាក់';
-      }
-
-      final now = DateTime.now();
-      final currentTime = TimeOfDay.fromDateTime(now);
-      final int currentMinutes = currentTime.hour * 60 + currentTime.minute;
-      final closingTimes = await ClosingTimeService.getAllClosingTimes();
-
-      // Get current day of week
-      int dayOfWeek = now.weekday; // 1 = Monday, 7 = Sunday
-      String dayName = '';
-      switch (dayOfWeek) {
-        case 1:
-          dayName = 'monday';
-          break;
-        case 2:
-          dayName = 'tuesday';
-          break;
-        case 3:
-          dayName = 'wednesday';
-          break;
-        case 4:
-          dayName = 'thursday';
-          break;
-        case 5:
-          dayName = 'friday';
-          break;
-        case 6:
-          dayName = 'saturday';
-          break;
-        case 7:
-          dayName = 'sunday';
-          break;
-      }
-
-      for (var lotteryTimeName in lotteryTimesToCheck) {
-        // Hard cutoff by lottery time label (e.g. 6:30PM) even if closing tables are missing.
-        final lotteryMinutes = _extractTimeFromLotteryTimeName(lotteryTimeName);
-        if (lotteryMinutes == null) {
-          return 'មិនអាចបកស្រាយម៉ោងឆ្នោត $lotteryTimeName បានទេ! មិនអាចបង់ប្រាក់បានទេ';
-        }
-        if (lotteryMinutes != null && currentMinutes >= lotteryMinutes) {
-          return 'ម៉ោងឆ្នោត $lotteryTimeName បានបិទហើយ! មិនអាចបង់ប្រាក់បានទេ';
-        }
-
-        final closingTime = closingTimes.firstWhere(
-          (ct) => ct.timeName == lotteryTimeName,
-          orElse: () => ClosingTime(
-            id: 0,
-            timeName: '',
-            startTime: '',
-            endTime: '',
-            vipEnabled: false,
-            posts: [],
-          ),
-        );
-
-        if (closingTime.id != 0 &&
-            closingTime.endTime.isNotEmpty &&
-            closingTime.posts.isNotEmpty) {
-          final endTimeParts = closingTime.endTime.split(':');
-          if (endTimeParts.length >= 2) {
-            final endHour = int.tryParse(endTimeParts[0]) ?? 0;
-            final endMinute = int.tryParse(endTimeParts[1]) ?? 0;
-            final endMinutes = endHour * 60 + endMinute;
-
-            final postsUsed = postsByLotteryTime[lotteryTimeName] ?? {};
-
-            for (var post in closingTime.posts) {
-              if (postsUsed.isNotEmpty &&
-                  !postsUsed.contains(post.postId.toUpperCase()))
-                continue;
-
-              String? daySpecificTimeStr;
-              switch (dayName) {
-                case 'monday':
-                  daySpecificTimeStr = post.monday;
-                  break;
-                case 'tuesday':
-                  daySpecificTimeStr = post.tuesday;
-                  break;
-                case 'wednesday':
-                  daySpecificTimeStr = post.wednesday;
-                  break;
-                case 'thursday':
-                  daySpecificTimeStr = post.thursday;
-                  break;
-                case 'friday':
-                  daySpecificTimeStr = post.friday;
-                  break;
-                case 'saturday':
-                  daySpecificTimeStr = post.saturday;
-                  break;
-                case 'sunday':
-                  daySpecificTimeStr = post.sunday;
-                  break;
-              }
-
-              if (daySpecificTimeStr != null && daySpecificTimeStr.isNotEmpty) {
-                final timeParts = daySpecificTimeStr.split(':');
-                if (timeParts.length >= 2) {
-                  final daySpecificHour = int.tryParse(timeParts[0]) ?? 0;
-                  final daySpecificMinute = int.tryParse(timeParts[1]) ?? 0;
-                  final daySpecificMinutes =
-                      daySpecificHour * 60 + daySpecificMinute;
-
-                  bool isPostClosed = false;
-                  if (endMinutes < daySpecificMinutes) {
-                    isPostClosed = currentMinutes >= daySpecificMinutes;
-                  } else {
-                    isPostClosed =
-                        currentMinutes >= daySpecificMinutes &&
-                        currentMinutes < endMinutes;
-                  }
-
-                  if (isPostClosed) {
-                    return 'ម៉ោងឆ្នោត $lotteryTimeName (ប៉ុស្តិ៍ ${post.postId}) បានបិទហើយ! មិនអាចបង់ប្រាក់បានទេ';
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    } catch (e) {
-      print('Error checking closing time: $e');
-    }
-    return null;
-  }
-
-  int? _extractTimeFromLotteryTimeName(String lotteryTimeName) {
-    try {
-      final timePattern = RegExp(
-        r'(\d{1,2}):(\d{2})\s*(AM|PM)',
-        caseSensitive: false,
-      );
-      final match = timePattern.firstMatch(lotteryTimeName);
-
-      if (match != null) {
-        final hour = int.tryParse(match.group(1) ?? '') ?? 0;
-        final minute = int.tryParse(match.group(2) ?? '') ?? 0;
-        final period = (match.group(3) ?? '').toUpperCase();
-
-        int hour24 = hour;
-        if (period == 'PM' && hour != 12) {
-          hour24 = hour + 12;
-        } else if (period == 'AM' && hour == 12) {
-          hour24 = 0;
-        }
-        return hour24 * 60 + minute;
-      }
-
-      final timePattern24 = RegExp(r'(\d{1,2}):(\d{2})');
-      final match24 = timePattern24.firstMatch(lotteryTimeName);
-
-      if (match24 != null) {
-        final hour = int.tryParse(match24.group(1) ?? '') ?? 0;
-        final minute = int.tryParse(match24.group(2) ?? '') ?? 0;
-        return hour * 60 + minute;
-      }
-
-      return null;
-    } catch (e) {
-      print('Error extracting time from lottery time name: $e');
-      return null;
-    }
+    return checkIfBetsClosedFromDb(bets);
   }
 
   @override
@@ -3808,6 +3379,207 @@ String _normalizeGroupField(String? s) {
   var t = s.trim().replaceAll(RegExp(r'\s+'), ' ');
   t = t.replaceAll(RegExp(r'[\u200B-\u200D\uFEFF]'), '');
   return t.toLowerCase();
+}
+
+String _weekdayNameFromDate(DateTime now) {
+  switch (now.weekday) {
+    case DateTime.monday:
+      return 'monday';
+    case DateTime.tuesday:
+      return 'tuesday';
+    case DateTime.wednesday:
+      return 'wednesday';
+    case DateTime.thursday:
+      return 'thursday';
+    case DateTime.friday:
+      return 'friday';
+    case DateTime.saturday:
+      return 'saturday';
+    default:
+      return 'sunday';
+  }
+}
+
+String? _daySpecificTimeForPost(ClosingTimePost post, String dayName) {
+  switch (dayName) {
+    case 'monday':
+      return post.monday;
+    case 'tuesday':
+      return post.tuesday;
+    case 'wednesday':
+      return post.wednesday;
+    case 'thursday':
+      return post.thursday;
+    case 'friday':
+      return post.friday;
+    case 'saturday':
+      return post.saturday;
+    case 'sunday':
+      return post.sunday;
+    default:
+      return null;
+  }
+}
+
+/// DB-only close check: `closing_time` + `closing_time_posts` per day/post.
+/// Returns post ids (conditions) that are closed right now.
+/// Missing/incomplete DB config is treated as open (not blocked).
+Future<List<String>> checkClosedPostsFromDb(
+  String lotteryTimeName,
+  List<String> selectedConditions,
+) async {
+  if (selectedConditions.isEmpty) return [];
+
+  try {
+    final closingTimes = await ClosingTimeService.getAllClosingTimes();
+    ClosingTime? closingTime;
+    for (final ct in closingTimes) {
+      if (ct.timeName == lotteryTimeName) {
+        closingTime = ct;
+        break;
+      }
+    }
+
+    if (closingTime == null ||
+        closingTime.id == 0 ||
+        closingTime.posts.isEmpty ||
+        closingTime.endTime.isEmpty) {
+      return [];
+    }
+
+    final now = DateTime.now();
+    final dayName = _weekdayNameFromDate(now);
+    final currentTime = TimeOfDay.fromDateTime(now);
+    final currentMinutes = currentTime.hour * 60 + currentTime.minute;
+
+    final endTimeParts = closingTime.endTime.split(':');
+    if (endTimeParts.length < 2) {
+      return [];
+    }
+    final endMinutes =
+        (int.tryParse(endTimeParts[0]) ?? 0) * 60 +
+        (int.tryParse(endTimeParts[1]) ?? 0);
+
+    final closedPosts = <String>[];
+
+    for (final condition in selectedConditions) {
+      ClosingTimePost? post;
+      for (final p in closingTime.posts) {
+        if (p.postId.toUpperCase() == condition.toUpperCase()) {
+          post = p;
+          break;
+        }
+      }
+
+      if (post == null) {
+        // If this post is not configured in DB for this lottery time,
+        // do not block it here.
+        continue;
+      }
+
+      final daySpecificTimeStr = _daySpecificTimeForPost(post, dayName);
+      if (daySpecificTimeStr == null || daySpecificTimeStr.isEmpty) {
+        // Missing day config for this post/day -> treat as open (not blocked).
+        continue;
+      }
+
+      final timeParts = daySpecificTimeStr.split(':');
+      if (timeParts.length < 2) {
+        continue;
+      }
+
+      final parsedHour = int.tryParse(timeParts[0]);
+      final parsedMinute = int.tryParse(timeParts[1]);
+      if (parsedHour == null || parsedMinute == null) {
+        continue;
+      }
+      final daySpecificMinutes = parsedHour * 60 + parsedMinute;
+
+      bool isBeforeStart;
+      if (endMinutes < daySpecificMinutes) {
+        isBeforeStart = currentMinutes <= endMinutes;
+      } else {
+        isBeforeStart = false;
+      }
+
+      bool isAfterClosing;
+      if (endMinutes < daySpecificMinutes) {
+        isAfterClosing = currentMinutes >= daySpecificMinutes;
+      } else {
+        isAfterClosing =
+            currentMinutes >= daySpecificMinutes &&
+            currentMinutes <= endMinutes;
+      }
+
+      if (isBeforeStart || isAfterClosing) {
+        closedPosts.add(condition);
+      }
+    }
+
+    return closedPosts;
+  } catch (e) {
+    print('Error checking closed posts from DB: $e');
+    return List<String>.from(selectedConditions.toSet());
+  }
+}
+
+/// DB-only: returns Khmer error message if any bet's posts are closed, else null.
+Future<String?> checkIfBetsClosedFromDb(List<dynamic> bets) async {
+  if (bets.isEmpty) return null;
+
+  try {
+    final lotteryTimesToCheck = <String>{};
+    final postsByLotteryTime = <String, Set<String>>{};
+
+    for (final bet in bets) {
+      String lotteryTime = '';
+      List<dynamic> selectedConditions = [];
+
+      if (bet is BetData) {
+        lotteryTime = bet.lotteryTime;
+        selectedConditions = bet.selectedConditions;
+      } else if (bet is Map<String, dynamic>) {
+        lotteryTime = bet['lottery_time'] as String? ?? '';
+        selectedConditions =
+            bet['selected_conditions'] as List<dynamic>? ?? [];
+      }
+
+      if (lotteryTime.isEmpty) continue;
+
+      lotteryTimesToCheck.add(lotteryTime);
+      postsByLotteryTime.putIfAbsent(lotteryTime, () => {});
+      for (final condition in selectedConditions) {
+        final conditionStr = condition.toString().toUpperCase();
+        if (conditionStr != '4P' && conditionStr != '7P') {
+          postsByLotteryTime[lotteryTime]!.add(conditionStr);
+        }
+      }
+    }
+
+    if (lotteryTimesToCheck.isEmpty) {
+      return 'មិនអាចផ្ទៀងផ្ទាត់ម៉ោងឆ្នោតបានទេ! សូមពិនិត្យទិន្នន័យ lottery_time';
+    }
+
+    for (final lotteryTimeName in lotteryTimesToCheck) {
+      final conditions = postsByLotteryTime[lotteryTimeName]?.toList() ?? [];
+      if (conditions.isEmpty) {
+        return 'ម៉ោងឆ្នោត $lotteryTimeName មិនមាន post ក្នុងភ្នាល់! មិនអាចបង់ប្រាក់បានទេ';
+      }
+
+      final closedPosts = await checkClosedPostsFromDb(
+        lotteryTimeName,
+        conditions,
+      );
+      if (closedPosts.isNotEmpty) {
+        return 'ម៉ោងឆ្នោត $lotteryTimeName (ប៉ុស្តិ៍ ${closedPosts.join(', ')}) បានបិទហើយ! មិនអាចបង់ប្រាក់បានទេ';
+      }
+    }
+
+    return null;
+  } catch (e) {
+    print('Error checking if bets closed from DB: $e');
+    return 'មិនអាចផ្ទៀងផ្ទាត់ម៉ោងបិទពីប្រព័ន្ធបានទេ! សូមព្យាយាមម្តងទៀត';
+  }
 }
 
 /// Stable group key: same logical customer + draw time → one card.
@@ -4153,6 +3925,40 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
     });
 
     try {
+      // Prevent editing when close-time is reached (same rule as other edit flows).
+      final List<dynamic> betsToCheck = [];
+      for (var betId in _editingBetIds) {
+        final bet = _bets.firstWhere(
+          (b) => (b['id'] as int?) == betId,
+          orElse: () => {},
+        );
+        if (bet.isNotEmpty) {
+          betsToCheck.add(bet);
+        }
+      }
+      final closedMessage = await _checkIfBettingClosed(betsToCheck);
+      if (closedMessage != null) {
+        _showTopErrorSnackBar(
+          closedMessage.replaceAll('មិនអាចបង់ប្រាក់បានទេ', 'មិនអាចកែប្រែបានទេ'),
+        );
+        return;
+      }
+
+      // Never allow editing paid bets from bottom-sheet edit flow.
+      // This prevents changing amount/conditions after payment.
+      for (var betId in _editingBetIds) {
+        final bet = _bets.firstWhere(
+          (b) => (b['id'] as int?) == betId,
+          orElse: () => {},
+        );
+        if (bet.isEmpty) continue;
+        final source = bet['source'] as String? ?? '';
+        if (source != 'pending_bets') {
+          _showTopErrorSnackBar('ភ្នាល់បានបង់ប្រាក់រួច មិនអាចកែប្រែបានទេ');
+          return;
+        }
+      }
+
       // Update each selected bet
       for (var betId in _editingBetIds) {
         final bet = _bets.firstWhere(
@@ -4192,17 +3998,6 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
         // Update based on source table
         if (source == 'pending_bets') {
           await BetsApi.updatePendingBetFull(
-            betId: betId,
-            customerName: customerName.isNotEmpty ? customerName : null,
-            betNumbers: betNumbers.isNotEmpty ? betNumbers : null,
-            amountPerNumber: amountPerNumber > 0 ? amountPerNumber : null,
-            selectedConditions: selectedConditions.isNotEmpty
-                ? selectedConditions
-                : null,
-            totalAmount: totalAmount > 0 ? totalAmount : null,
-          );
-        } else if (source == 'bets') {
-          await BetsApi.updateBet(
             betId: betId,
             customerName: customerName.isNotEmpty ? customerName : null,
             betNumbers: betNumbers.isNotEmpty ? betNumbers : null,
@@ -4307,221 +4102,9 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
     return betIds;
   }
 
-  /// Extract time from lottery time name (e.g., "យួន 2:30PM" -> 14:30 in minutes)
-  /// Handles formats: "10:30AM", "2:30PM", "8:00 AM", "12:00" (assumed PM/noon)
-  int? _extractTimeFromLotteryTimeName(String lotteryTimeName) {
-    try {
-      // Pattern 1: Try to extract time with AM/PM (with or without space)
-      // Matches: "10:30AM", "2:30PM", "8:00 AM", "2:00 PM", etc.
-      final timePattern = RegExp(
-        r'(\d{1,2}):(\d{2})\s*(AM|PM)',
-        caseSensitive: false,
-      );
-      final match = timePattern.firstMatch(lotteryTimeName);
-
-      if (match != null) {
-        final hour = int.tryParse(match.group(1) ?? '') ?? 0;
-        final minute = int.tryParse(match.group(2) ?? '') ?? 0;
-        final period = (match.group(3) ?? '').toUpperCase();
-
-        int hour24 = hour;
-        if (period == 'PM' && hour != 12) {
-          hour24 = hour + 12;
-        } else if (period == 'AM' && hour == 12) {
-          hour24 = 0; // 12:00 AM = midnight = 0:00
-        }
-        // If period is PM and hour is 12, keep it as 12 (12:00 PM = noon = 12:00)
-
-        return hour24 * 60 + minute;
-      }
-
-      // Pattern 2: Try 24-hour format (e.g., "14:30", "08:45")
-      // This also catches times without AM/PM like "12:00" (assumed to be noon/PM)
-      final timePattern24 = RegExp(r'(\d{1,2}):(\d{2})');
-      final match24 = timePattern24.firstMatch(lotteryTimeName);
-
-      if (match24 != null) {
-        final hour = int.tryParse(match24.group(1) ?? '') ?? 0;
-        final minute = int.tryParse(match24.group(2) ?? '') ?? 0;
-
-        // If hour is 0-11 and no AM/PM was found, assume it's already in 24-hour format
-        // But if it's 12:00 without AM/PM, assume it's noon (12:00 PM = 12:00)
-        // For lottery times, times like "12:00" are almost certainly noon, not midnight
-        // So we keep it as-is (12:00 = 720 minutes = noon)
-
-        return hour * 60 + minute;
-      }
-
-      return null;
-    } catch (e) {
-      print('Error extracting time from lottery time name: $e');
-      return null;
-    }
-  }
-
-  /// Check if betting is closed for a list of bets
-  /// Returns a message describing which lottery is closed, or null if all are open
+  /// DB-only close check for pay / edit / cancel.
   Future<String?> _checkIfBettingClosed(List<dynamic> bets) async {
-    if (bets.isEmpty) return null;
-
-    try {
-      final Set<String> lotteryTimesToCheck = {};
-      final Map<String, Set<String>> postsByLotteryTime = {};
-
-      for (var bet in bets) {
-        String lotteryTime = '';
-        List<dynamic> selectedConditions = [];
-
-        if (bet is BetData) {
-          lotteryTime = bet.lotteryTime;
-          selectedConditions = bet.selectedConditions;
-        } else if (bet is Map<String, dynamic>) {
-          lotteryTime = bet['lottery_time'] as String? ?? '';
-          selectedConditions =
-              bet['selected_conditions'] as List<dynamic>? ?? [];
-        }
-
-        if (lotteryTime.isNotEmpty) {
-          lotteryTimesToCheck.add(lotteryTime);
-          postsByLotteryTime.putIfAbsent(lotteryTime, () => {});
-          for (var condition in selectedConditions) {
-            final conditionStr = condition.toString().toUpperCase();
-            if (conditionStr != '4P' && conditionStr != '7P') {
-              postsByLotteryTime[lotteryTime]!.add(conditionStr);
-            }
-          }
-        }
-      }
-
-      if (lotteryTimesToCheck.isEmpty) {
-        return 'មិនអាចផ្ទៀងផ្ទាត់ម៉ោងឆ្នោតបានទេ! សូមពិនិត្យទិន្នន័យ lottery_time មុនបង់ប្រាក់';
-      }
-
-      final now = DateTime.now();
-      final currentTime = TimeOfDay.fromDateTime(now);
-      final int currentMinutes = currentTime.hour * 60 + currentTime.minute;
-      final closingTimes = await ClosingTimeService.getAllClosingTimes();
-
-      // Get current day of week
-      int dayOfWeek = now.weekday; // 1 = Monday, 7 = Sunday
-      String dayName = '';
-      switch (dayOfWeek) {
-        case 1:
-          dayName = 'monday';
-          break;
-        case 2:
-          dayName = 'tuesday';
-          break;
-        case 3:
-          dayName = 'wednesday';
-          break;
-        case 4:
-          dayName = 'thursday';
-          break;
-        case 5:
-          dayName = 'friday';
-          break;
-        case 6:
-          dayName = 'saturday';
-          break;
-        case 7:
-          dayName = 'sunday';
-          break;
-      }
-
-      for (var lotteryTimeName in lotteryTimesToCheck) {
-        // Hard cutoff by lottery time label (e.g. 6:30PM) even if closing tables are missing.
-        final lotteryMinutes = _extractTimeFromLotteryTimeName(lotteryTimeName);
-        if (lotteryMinutes == null) {
-          return 'មិនអាចបកស្រាយម៉ោងឆ្នោត $lotteryTimeName បានទេ! មិនអាចបង់ប្រាក់បានទេ';
-        }
-        if (lotteryMinutes != null && currentMinutes >= lotteryMinutes) {
-          return 'ម៉ោងឆ្នោត $lotteryTimeName បានបិទហើយ! មិនអាចបង់ប្រាក់បានទេ';
-        }
-
-        final closingTime = closingTimes.firstWhere(
-          (ct) => ct.timeName == lotteryTimeName,
-          orElse: () => ClosingTime(
-            id: 0,
-            timeName: '',
-            startTime: '',
-            endTime: '',
-            vipEnabled: false,
-            posts: [],
-          ),
-        );
-
-        if (closingTime.id != 0 &&
-            closingTime.endTime.isNotEmpty &&
-            closingTime.posts.isNotEmpty) {
-          final endTimeParts = closingTime.endTime.split(':');
-          if (endTimeParts.length >= 2) {
-            final endHour = int.tryParse(endTimeParts[0]) ?? 0;
-            final endMinute = int.tryParse(endTimeParts[1]) ?? 0;
-            final endMinutes = endHour * 60 + endMinute;
-
-            final postsUsed = postsByLotteryTime[lotteryTimeName] ?? {};
-
-            for (var post in closingTime.posts) {
-              if (postsUsed.isNotEmpty &&
-                  !postsUsed.contains(post.postId.toUpperCase()))
-                continue;
-
-              String? daySpecificTimeStr;
-              switch (dayName) {
-                case 'monday':
-                  daySpecificTimeStr = post.monday;
-                  break;
-                case 'tuesday':
-                  daySpecificTimeStr = post.tuesday;
-                  break;
-                case 'wednesday':
-                  daySpecificTimeStr = post.wednesday;
-                  break;
-                case 'thursday':
-                  daySpecificTimeStr = post.thursday;
-                  break;
-                case 'friday':
-                  daySpecificTimeStr = post.friday;
-                  break;
-                case 'saturday':
-                  daySpecificTimeStr = post.saturday;
-                  break;
-                case 'sunday':
-                  daySpecificTimeStr = post.sunday;
-                  break;
-              }
-
-              if (daySpecificTimeStr != null && daySpecificTimeStr.isNotEmpty) {
-                final timeParts = daySpecificTimeStr.split(':');
-                if (timeParts.length >= 2) {
-                  final daySpecificHour = int.tryParse(timeParts[0]) ?? 0;
-                  final daySpecificMinute = int.tryParse(timeParts[1]) ?? 0;
-                  final daySpecificMinutes =
-                      daySpecificHour * 60 + daySpecificMinute;
-
-                  bool isPostClosed = false;
-                  if (endMinutes < daySpecificMinutes) {
-                    isPostClosed = currentMinutes >= daySpecificMinutes;
-                  } else {
-                    isPostClosed =
-                        currentMinutes >= daySpecificMinutes &&
-                        currentMinutes < endMinutes;
-                  }
-
-                  if (isPostClosed) {
-                    return 'ម៉ោងឆ្នោត $lotteryTimeName (ប៉ុស្តិ៍ ${post.postId}) បានបិទហើយ! មិនអាចបង់ប្រាក់បានទេ';
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    } catch (e) {
-      print('Error checking closing time: $e');
-    }
-    return null;
+    return checkIfBetsClosedFromDb(bets);
   }
 
   /// Show receipt preview for selected groups
@@ -4568,13 +4151,6 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
             print('Error converting bet to BetData: $e');
           }
         }
-      }
-
-      // Use same close-time guard as bet/pay/edit before allowing print preview.
-      final closedMessage = await _checkIfBettingClosed(betsToCheck);
-      if (closedMessage != null) {
-        _showTopErrorSnackBar(closedMessage);
-        return;
       }
 
       if (allBetsToShow.isEmpty) {
@@ -4625,230 +4201,26 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
       return;
     }
 
-    // Check if any selected bets are within their betting window (startTime <= current < endTime)
-    // Logic: If current time is within betting window (startTime <= current < endTime), cannot cancel (betting is active)
-    // If current time is outside betting window (current < startTime OR current >= endTime), can cancel (betting window is closed)
-    try {
-      final groupedBets = _groupBetsByCustomerTime();
-      final Set<String> lotteryTimesToCheck = {};
-
-      // Collect unique lottery times from selected groups
-      for (var selectedKey in _selectedGroups) {
-        final groupBets = groupedBets[selectedKey] ?? [];
-        for (var bet in groupBets) {
-          final source = bet['source'] as String? ?? '';
-          if (source == 'bets') {
-            final lotteryTime = bet['lottery_time'] as String? ?? '';
-            if (lotteryTime.isNotEmpty) {
-              lotteryTimesToCheck.add(lotteryTime);
-            }
-          }
+    // Same time rule as bet/pay/edit: once closed-time is reached, cannot cancel to unpaid.
+    final groupedBetsForCheck = _groupBetsByCustomerTime();
+    final List<dynamic> betsToCheck = [];
+    for (var selectedKey in _selectedGroups) {
+      final groupBets = groupedBetsForCheck[selectedKey] ?? [];
+      for (var bet in groupBets) {
+        if ((bet['source'] as String? ?? '') == 'bets') {
+          betsToCheck.add(bet);
         }
       }
-
-      // Get current time (resets automatically each day)
-      // DateTime.now() gives current date and time, so comparisons reset day by day
-      final DateTime now = DateTime.now();
-      final TimeOfDay currentTime = TimeOfDay.fromDateTime(now);
-      final int currentMinutes = currentTime.hour * 60 + currentTime.minute;
-
-      // Get all closing times from database
-      final closingTimes = await ClosingTimeService.getAllClosingTimes();
-
-      // Get current day of week
-      int dayOfWeek = now.weekday; // 1 = Monday, 7 = Sunday
-      String dayName = '';
-      switch (dayOfWeek) {
-        case 1:
-          dayName = 'monday';
-          break;
-        case 2:
-          dayName = 'tuesday';
-          break;
-        case 3:
-          dayName = 'wednesday';
-          break;
-        case 4:
-          dayName = 'thursday';
-          break;
-        case 5:
-          dayName = 'friday';
-          break;
-        case 6:
-          dayName = 'saturday';
-          break;
-        case 7:
-          dayName = 'sunday';
-          break;
-      }
-
-      // Check each lottery time and ONLY the posts used in the selected bets
-      // Logic: Cannot cancel when ANY post used in the bet has passed its closing time (current >= closing time)
-      // Can cancel when all posts used in the bet are still open (current < closing time)
-      // Need to check post-specific closing times from closing_time_posts
-      List<String> activeBettingWindows = [];
-      for (var lotteryTimeName in lotteryTimesToCheck) {
-        // Collect all posts (conditions) used in bets for this lottery time
-        final Set<String> postsUsedInBets = {};
-        for (var selectedKey in _selectedGroups) {
-          final groupBets = groupedBets[selectedKey] ?? [];
-          for (var bet in groupBets) {
-            final source = bet['source'] as String? ?? '';
-            final betLotteryTime = bet['lottery_time'] as String? ?? '';
-            if (source == 'bets' && betLotteryTime == lotteryTimeName) {
-              // Get selected conditions (posts) from this bet
-              final selectedConditions =
-                  bet['selected_conditions'] as List<dynamic>? ?? [];
-              for (var condition in selectedConditions) {
-                final conditionStr = condition.toString().toUpperCase();
-                // Filter out shortcuts (4P, 7P) - they don't represent actual posts
-                if (conditionStr != '4P' && conditionStr != '7P') {
-                  postsUsedInBets.add(conditionStr);
-                }
-              }
-            }
-          }
-        }
-
-        // Find closing time for this lottery time
-        final closingTime = closingTimes.firstWhere(
-          (ct) => ct.timeName == lotteryTimeName,
-          orElse: () => ClosingTime(
-            id: 0,
-            timeName: '',
-            startTime: '',
-            endTime: '',
-            vipEnabled: false,
-            posts: [],
-          ),
-        );
-
-        if (closingTime.id != 0 &&
-            closingTime.endTime.isNotEmpty &&
-            closingTime.posts.isNotEmpty) {
-          // Parse end_time from closing_time (when betting opens)
-          final endTimeParts = closingTime.endTime.split(':');
-          if (endTimeParts.length >= 2) {
-            final endHour = int.tryParse(endTimeParts[0]) ?? 0;
-            final endMinute = int.tryParse(endTimeParts[1]) ?? 0;
-            final endMinutes = endHour * 60 + endMinute;
-
-            // Check ONLY the posts that were used in the bets
-            // If ANY of these posts has passed its closing time, cannot cancel
-            // Logic: If current time >= post closing time, cannot cancel (betting has closed)
-            // If current time < post closing time, can cancel (betting hasn't closed yet)
-            bool hasClosedPost = false;
-            for (var post in closingTime.posts) {
-              // Only check posts that were actually used in the bets
-              if (!postsUsedInBets.contains(post.postId.toUpperCase())) {
-                continue; // Skip posts not used in the bets
-              }
-              // Get day-specific closing time for this post
-              String? daySpecificTimeStr;
-              switch (dayName) {
-                case 'monday':
-                  daySpecificTimeStr = post.monday;
-                  break;
-                case 'tuesday':
-                  daySpecificTimeStr = post.tuesday;
-                  break;
-                case 'wednesday':
-                  daySpecificTimeStr = post.wednesday;
-                  break;
-                case 'thursday':
-                  daySpecificTimeStr = post.thursday;
-                  break;
-                case 'friday':
-                  daySpecificTimeStr = post.friday;
-                  break;
-                case 'saturday':
-                  daySpecificTimeStr = post.saturday;
-                  break;
-                case 'sunday':
-                  daySpecificTimeStr = post.sunday;
-                  break;
-              }
-
-              if (daySpecificTimeStr != null && daySpecificTimeStr.isNotEmpty) {
-                // Parse day-specific closing time
-                final timeParts = daySpecificTimeStr.split(':');
-                if (timeParts.length >= 2) {
-                  final daySpecificHour = int.tryParse(timeParts[0]) ?? 0;
-                  final daySpecificMinute = int.tryParse(timeParts[1]) ?? 0;
-                  final daySpecificMinutes =
-                      daySpecificHour * 60 + daySpecificMinute;
-
-                  // Check if current time >= post closing time
-                  // If yes, cannot cancel (betting has closed for this post)
-                  // If no, can cancel (betting hasn't closed yet)
-                  bool isPostClosed = false;
-
-                  if (endMinutes < daySpecificMinutes) {
-                    // End time is before day-specific time (e.g., 05:00 < 20:44)
-                    // Post closes at daySpecificTime (20:44)
-                    // Post is closed if: current >= daySpecificTime
-                    isPostClosed = currentMinutes >= daySpecificMinutes;
-                  } else {
-                    // End time is after day-specific time (e.g., 20:00 > 17:20)
-                    // This means post closes at daySpecificTime, then reopens at endTime
-                    // Post is closed if: current >= daySpecificTime AND current < endTime
-                    isPostClosed =
-                        currentMinutes >= daySpecificMinutes &&
-                        currentMinutes < endMinutes;
-                  }
-
-                  if (isPostClosed) {
-                    hasClosedPost = true;
-                    print(
-                      '⏰ Cancellation check [${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}]: lotteryTime=$lotteryTimeName, post=${post.postId}, day=$dayName, endTime=${closingTime.endTime} (${endMinutes}min), postClosingTime=$daySpecificTimeStr (${daySpecificMinutes}min), currentTime=${currentTime.hour}:${currentTime.minute.toString().padLeft(2, '0')} (${currentMinutes}min), isPostClosed=true - CANNOT CANCEL',
-                    );
-                    break; // Found a closed post, no need to check others
-                  } else {
-                    print(
-                      '⏰ Cancellation check [${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}]: lotteryTime=$lotteryTimeName, post=${post.postId}, day=$dayName, postClosingTime=$daySpecificTimeStr (${daySpecificMinutes}min), currentTime=${currentTime.hour}:${currentTime.minute.toString().padLeft(2, '0')} (${currentMinutes}min), isPostClosed=false - CAN CANCEL',
-                    );
-                  }
-                }
-              }
-            }
-
-            if (postsUsedInBets.isEmpty) {
-              // No posts found in bets - allow cancellation (fail open)
-              print(
-                '⚠️ No posts found in bets for $lotteryTimeName - allowing cancellation (fail open)',
-              );
-            } else if (hasClosedPost) {
-              activeBettingWindows.add(lotteryTimeName);
-            } else {
-              print(
-                '⏰ Cancellation check [${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}]: lotteryTime=$lotteryTimeName, all used posts (${postsUsedInBets.join(", ")}) are still open - can cancel',
-              );
-            }
-          }
-        } else {
-          // No closing time found or missing data - allow cancellation (fail open)
-          print(
-            '⚠️ No closing time or missing data for $lotteryTimeName - allowing cancellation (fail open)',
-          );
-        }
-      }
-
-      // If any bets are within their betting window (startTime <= current < endTime), prevent cancellation
-      if (activeBettingWindows.isNotEmpty) {
-        final lotteryTimesStr = activeBettingWindows.join(', ');
-        Get.snackbar(
-          'កំហុស',
-          'មិនអាចបោះបង់បង់ប្រាក់បាន - ម៉ោងចាក់បាច់កំពុងបើកសម្រាប់: $lotteryTimesStr',
-          backgroundColor: Colors.red,
-          colorText: Colors.white,
-          duration: const Duration(seconds: 4),
-          snackPosition: SnackPosition.TOP,
-        );
-        return;
-      }
-    } catch (e) {
-      print('Error checking lottery times: $e');
-      // Continue with cancellation if check fails (fail open)
+    }
+    final closedMessage = await _checkIfBettingClosed(betsToCheck);
+    if (closedMessage != null) {
+      _showTopErrorSnackBar(
+        closedMessage.replaceAll(
+          'មិនអាចបង់ប្រាក់បានទេ',
+          'មិនអាចបោះបង់ទៅមិនទាន់បង់បានទេ',
+        ),
+      );
+      return;
     }
 
     setState(() {
@@ -4922,20 +4294,28 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
 
   /// Process payment for selected groups
   Future<void> _processPayment() async {
+    final groupedBets = _groupBetsByCustomerTime();
+    bool hasPendingInSelection = false;
+    for (var selectedKey in _selectedGroups) {
+      final groupBets = groupedBets[selectedKey] ?? [];
+      if (groupBets.any((bet) => (bet['source'] as String? ?? '') == 'pending_bets')) {
+        hasPendingInSelection = true;
+        break;
+      }
+    }
+    if (!hasPendingInSelection) {
+      _showTopErrorSnackBar('ក្រុមនេះបានបង់ប្រាក់រួចហើយ');
+      return;
+    }
+
     final selectedBetIds = _getSelectedPendingBetIds();
 
     if (selectedBetIds.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('សូមជ្រើសរើសភ្នាល់ដែលអ្នកចង់បង់ប្រាក់'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      _showTopErrorSnackBar('មិនមានភ្នាល់រង់ចាំបង់ប្រាក់');
       return;
     }
 
     // Check if betting is closed for any of the selected groups
-    final groupedBets = _groupBetsByCustomerTime();
     final List<dynamic> betsToCheck = [];
     for (var selectedKey in _selectedGroups) {
       final groupBets = groupedBets[selectedKey] ?? [];

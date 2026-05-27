@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import '../../../core/config.dart';
 import '../service/data_service.dart';
 import '../../login-register/service/auth_service.dart';
 import '../../login-register/view/login_screen.dart';
@@ -37,6 +38,22 @@ class CustomDrawer extends StatelessWidget {
           const SizedBox(height: 16),
           _buildPhoneNumber(),
           const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: Colors.white24),
+            ),
+            child: Text(
+              'v${SupabaseConfig.appBuildLabel} (${SupabaseConfig.activeBranch})',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
         ],
       ),
     );

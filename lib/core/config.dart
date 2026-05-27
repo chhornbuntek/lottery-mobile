@@ -1,8 +1,11 @@
 /// Supabase: switch backend by changing [activeBranch] only
 /// (`branch1`, `branch2`, or `branch3`).
 class SupabaseConfig {
+  /// Visible app build label for QA/client verification.
+  static const String appBuildLabel = '1.0.1+2';
+
   /// Set to `branch1`, `branch2`, or `branch3` — no build flags needed.
-  static const String activeBranch = 'branch2';
+  static const String activeBranch = 'branch1';
 
   static String get supabaseUrl {
     switch (activeBranch) {

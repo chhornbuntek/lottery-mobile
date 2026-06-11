@@ -36,6 +36,17 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
   List<BetData> _fetchedBetList = [];
   bool _isLoading = true;
 
+  /// Show what the user typed (e.g. `234x`), not expanded permutations.
+  String _betNumbersDisplayForReceipt(BetData bet) {
+    final pattern = bet.betPattern.trim();
+    if (pattern.isNotEmpty) return pattern;
+    if (bet.betNumbers.isEmpty) return '';
+    if (bet.betNumbers.length > 10) {
+      return '${bet.betNumbers.take(10).join(', ')}...';
+    }
+    return bet.betNumbers.join(', ');
+  }
+
   @override
   void initState() {
     super.initState();
@@ -388,11 +399,7 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
           int index = entry.key;
           BetData bet = entry.value;
 
-          // Format bet numbers
-          String betNumbersDisplay = bet.betNumbers.join(', ');
-          if (bet.betNumbers.length > 10) {
-            betNumbersDisplay = '${bet.betNumbers.take(10).join(', ')}...';
-          }
+          final betNumbersDisplay = _betNumbersDisplayForReceipt(bet);
 
           // Format conditions (filter out 4P and 7P shortcuts)
           final conditionsDisplay = bet.selectedConditions

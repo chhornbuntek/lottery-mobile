@@ -1336,6 +1336,7 @@ class _BettingScreenState extends State<BettingScreen> {
                           _betList.clear();
                           _pendingBetIds.clear();
                           _totalAmount = 0;
+                          _checkboxes.updateAll((_, __) => false);
                         }
                       });
                       Navigator.of(context).pop();
@@ -2412,9 +2413,13 @@ class _BettingScreenState extends State<BettingScreen> {
                               )
                               .map((c) => c.toString())
                               .join(' ');
+                          final storedPattern =
+                              bet['bet_pattern'] as String? ?? '';
                           final betNumbers =
                               bet['bet_numbers'] as List<dynamic>? ?? [];
-                          final betPattern = betNumbers.join(', ');
+                          final betPattern = storedPattern.trim().isNotEmpty
+                              ? storedPattern.trim()
+                              : betNumbers.map((n) => n.toString()).join(', ');
                           final amountPerNumber =
                               bet['amount_per_number'] as int? ?? 0;
 

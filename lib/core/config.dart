@@ -1,11 +1,13 @@
+import 'receipt_image_template.dart';
+
 /// Supabase: switch backend by changing [activeBranch] only
 /// (`branch1`, `branch2`, or `branch3`).
 class SupabaseConfig {
   /// Visible app build label for QA/client verification.
-  static const String appBuildLabel = '1.0.1+4';
+  static const String appBuildLabel = '1.0.1+5';
 
   /// Set to `branch1`, `branch2`, or `branch3` — no build flags needed.
-  static const String activeBranch = 'branch3';
+  static const String activeBranch = 'branch1';
 
   static String get supabaseUrl {
     switch (activeBranch) {
@@ -54,4 +56,10 @@ class SupabaseConfig {
         return 'assets/logo2.png';
     }
   }
+
+  /// branch1 / branch3 use full-width header/footer images with bet rows in between.
+  static bool get usesImageReceiptTemplate => imageReceiptTemplate != null;
+
+  static ImageReceiptTemplate? get imageReceiptTemplate =>
+      ImageReceiptTemplate.forBranch(activeBranch);
 }

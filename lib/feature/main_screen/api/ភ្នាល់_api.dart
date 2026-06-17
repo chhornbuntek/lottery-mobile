@@ -245,7 +245,7 @@ class BetsApi {
             )
           ''')
           .eq('user_id', user.id)
-          .order('created_at', ascending: false);
+          .order('created_at', ascending: true);
 
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
@@ -982,6 +982,19 @@ class BetsApi {
           }
         }
       }
+
+      // Oldest first for receipt row 1, 2, 3… (inFilter returns random order).
+      allBets.sort((a, b) {
+        final aTime = DateTime.parse(
+          a['created_at'] ?? DateTime.now().toIso8601String(),
+        );
+        final bTime = DateTime.parse(
+          b['created_at'] ?? DateTime.now().toIso8601String(),
+        );
+        final cmp = aTime.compareTo(bTime);
+        if (cmp != 0) return cmp;
+        return ((a['id'] as int?) ?? 0).compareTo((b['id'] as int?) ?? 0);
+      });
 
       return allBets;
     } catch (e) {

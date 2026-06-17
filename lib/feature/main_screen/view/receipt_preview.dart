@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:gal/gal.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/config.dart';
+import '../../../core/receipt_image_template.dart';
 import '../service/ភ្នាល់_service.dart';
 
 class ReceiptPreview extends StatefulWidget {
@@ -35,6 +36,17 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
   final GlobalKey _repaintBoundaryKey = GlobalKey();
   List<BetData> _fetchedBetList = [];
   bool _isLoading = true;
+
+  /// Receipt rows: oldest bet = ល.រ 1, newest bet = last row.
+  List<BetData> _betsInReceiptOrder(List<BetData> bets) {
+    final ordered = List<BetData>.from(bets);
+    ordered.sort((a, b) {
+      final byTime = a.createdAt.compareTo(b.createdAt);
+      if (byTime != 0) return byTime;
+      return (a.id ?? 0).compareTo(b.id ?? 0);
+    });
+    return ordered;
+  }
 
   /// Show what the user typed (e.g. `234x`), not expanded permutations.
   String _betNumbersDisplayForReceipt(BetData bet) {
@@ -64,7 +76,7 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
           );
         }
         setState(() {
-          _fetchedBetList = widget.betList;
+          _fetchedBetList = _betsInReceiptOrder(widget.betList);
           _isLoading = false;
         });
         return;
@@ -95,7 +107,7 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
           }
         }
         setState(() {
-          _fetchedBetList = bets;
+          _fetchedBetList = _betsInReceiptOrder(bets);
           _isLoading = false;
         });
       } else {
@@ -110,18 +122,20 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
           );
         }
         setState(() {
-          _fetchedBetList = pendingBets;
+          _fetchedBetList = _betsInReceiptOrder(pendingBets);
           _isLoading = false;
         });
       }
     } catch (e) {
       print('Error fetching bets: $e');
       setState(() {
-        _fetchedBetList = widget.betList; // Fallback to passed data
+        _fetchedBetList = _betsInReceiptOrder(widget.betList);
         _isLoading = false;
       });
     }
   }
+
+  ImageReceiptTemplate get _tpl => SupabaseConfig.imageReceiptTemplate!;
 
   @override
   Widget build(BuildContext context) {
@@ -141,34 +155,62 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
+          : SupabaseConfig.usesImageReceiptTemplate
+          ? _buildImageReceiptPreviewBody(context)
           : SingleChildScrollView(
               padding: const EdgeInsets.all(16),
-              child: Center(
-                child: RepaintBoundary(
-                  key: _repaintBoundaryKey,
-                  child: Container(
-                    width: 400, // Fixed receipt width (like a physical receipt)
-                    constraints: BoxConstraints(
-                      maxWidth:
-                          MediaQuery.of(context).size.width -
-                          32, // Responsive max width
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(8),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.1),
-                          blurRadius: 10,
-                          offset: const Offset(0, 5),
-                        ),
-                      ],
-                    ),
-                    child: _buildReceiptWithTemplate(),
-                  ),
-                ),
-              ),
+              child: Center(child: _buildDefaultReceiptCard(context)),
             ),
+    );
+  }
+
+  double _receiptWidth(BuildContext context) {
+    final maxW = MediaQuery.of(context).size.width - 32;
+    return maxW < 400.0 ? maxW : 400.0;
+  }
+
+  Widget _buildDefaultReceiptCard(BuildContext context) {
+    return RepaintBoundary(
+      key: _repaintBoundaryKey,
+      child: Container(
+        width: 400,
+        constraints: BoxConstraints(maxWidth: _receiptWidth(context)),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 10,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: _buildReceiptWithTemplate(),
+      ),
+    );
+  }
+
+  Widget _buildImageReceiptPreviewBody(BuildContext context) {
+    if (_fetchedBetList.isEmpty) {
+      return const Center(child: Text('មិនមានទិន្នន័យ'));
+    }
+
+    final firstBet = _fetchedBetList.first;
+    final now = DateTime.now();
+    final width = _receiptWidth(context);
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Center(
+        child: RepaintBoundary(
+          key: _repaintBoundaryKey,
+          child: SizedBox(
+            width: width,
+            child: _buildImageReceipt(firstBet, now, width),
+          ),
+        ),
+      ),
     );
   }
 
@@ -190,28 +232,340 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header with Logo
           _buildHeader(firstBet, now),
-
-          // Customer Information
           _buildCustomerInfo(firstBet),
-
           const SizedBox(height: 24),
-
-          // Divider
           const Divider(thickness: 1),
-
           const SizedBox(height: 16),
-
-          // Bet Table
           _buildBetTable(),
-
           const SizedBox(height: 24),
-
-          // Footer
           _buildFooter(now),
         ],
       ),
+    );
+  }
+
+  Widget _buildImageReceipt(
+    BetData firstBet,
+    DateTime now,
+    double width,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildImageHeader(firstBet, now),
+        _buildImageBetRows(width),
+        _buildImageFooter(now),
+      ],
+    );
+  }
+
+  Widget _buildImageHeader(BetData firstBet, DateTime now) {
+    final dateStr = '${now.day}/${now.month}/${now.year}';
+    final t = _tpl;
+
+    return _buildImageSection(
+      asset: t.headerAsset,
+      aspectRatio: t.headerAspect,
+      overlays: (width, height) => [
+        _imageFieldBox(
+          rect: t.nameField,
+          imageWidth: width,
+          imageHeight: height,
+          text: firstBet.customerName,
+          color: t.fieldTextColor,
+        ),
+        _imageFieldBox(
+          rect: t.billField,
+          imageWidth: width,
+          imageHeight: height,
+          text: _billNumber(firstBet),
+          color: t.fieldTextColor,
+        ),
+        _imageFieldBox(
+          rect: t.dateField,
+          imageWidth: width,
+          imageHeight: height,
+          text: dateStr,
+          color: t.fieldTextColor,
+        ),
+        _imageFieldBox(
+          rect: t.lotteryField,
+          imageWidth: width,
+          imageHeight: height,
+          text: firstBet.lotteryTime,
+          color: t.fieldTextColor,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildImageFooter(DateTime now) {
+    final t = _tpl;
+
+    return _buildImageSection(
+      asset: t.footerAsset,
+      aspectRatio: t.footerAspect,
+      overlays: (width, height) {
+        final totalAmount = _calculateTotalAmount();
+        final totalText = _formatAmountWithCommas(totalAmount);
+        final totalDigits = totalAmount.abs().toString().length;
+
+        return [
+          if (t.agentField != null)
+            _imageFieldBox(
+              rect: t.agentField!,
+              imageWidth: width,
+              imageHeight: height,
+              text: _getCurrentUserName(),
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+            ),
+          _imageFieldBox(
+            rect: t.entryTimeField,
+            imageWidth: width,
+            imageHeight: height,
+            text: _formatCambodiaTime(now),
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+          ),
+          _imageFieldBox(
+            rect: t.totalField,
+            imageWidth: width,
+            imageHeight: height,
+            text: totalText,
+            color: Colors.white,
+            digitCount: totalDigits,
+            fontWeight: FontWeight.bold,
+            alignment: Alignment.center,
+          ),
+          if (t.branchField != null)
+            _imageFieldBox(
+              rect: t.branchField!,
+              imageWidth: width,
+              imageHeight: height,
+              text: _getCurrentUserName(),
+              color: t.agentTextColor ?? t.fieldTextColor,
+              fontWeight: FontWeight.bold,
+              paddingLeft: 2,
+            ),
+        ];
+      },
+    );
+  }
+
+  Widget _buildImageSection({
+    required String asset,
+    required double aspectRatio,
+    required List<Widget> Function(double width, double height) overlays,
+  }) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final height = width / aspectRatio;
+        return SizedBox(
+          width: width,
+          height: height,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Image.asset(
+                asset,
+                width: width,
+                height: height,
+                fit: BoxFit.fill,
+                errorBuilder: (context, error, stackTrace) {
+                  return Container(
+                    color: Colors.grey[300],
+                    child: const Center(child: Icon(Icons.broken_image)),
+                  );
+                },
+              ),
+              ...overlays(width, height),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  String _billNumber(BetData bet) {
+    if (bet.invoiceNumber != null && bet.invoiceNumber!.isNotEmpty) {
+      return bet.invoiceNumber!;
+    }
+    return bet.billType;
+  }
+
+  String _formatAmountWithCommas(int amount) {
+    return amount.toString().replaceAllMapped(
+      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+      (match) => '${match[1]},',
+    );
+  }
+
+  Widget _imageFieldBox({
+    required ReceiptFieldRect rect,
+    required double imageWidth,
+    required double imageHeight,
+    required String text,
+    Widget? child,
+    Color? color,
+    int? digitCount,
+    FontWeight fontWeight = FontWeight.bold,
+    Alignment alignment = Alignment.centerLeft,
+    double paddingLeft = 2,
+  }) {
+    final textColor = color ?? _tpl.fieldTextColor;
+    final fontSize = rect.fontSizeFor(digitCount: digitCount);
+
+    return Positioned(
+      left: imageWidth * rect.left,
+      top: imageHeight * rect.top,
+      width: imageWidth * rect.width,
+      height: imageHeight * rect.height,
+      child: Align(
+        alignment: alignment,
+        child: Padding(
+          padding: EdgeInsets.only(left: paddingLeft),
+          child:
+              child ??
+              Text(
+                text,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: alignment == Alignment.centerRight
+                    ? TextAlign.right
+                    : alignment == Alignment.center
+                    ? TextAlign.center
+                    : TextAlign.left,
+                style: TextStyle(
+                  fontSize: fontSize,
+                  fontWeight: fontWeight,
+                  color: textColor,
+                  height: 1.0,
+                ),
+              ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildImageBetRows(double receiptWidth) {
+    final t = _tpl;
+    final tableWidth = receiptWidth * 0.96;
+    final sideInset = receiptWidth * 0.02;
+
+    return Container(
+      color: t.rowBackgroundColor,
+      padding: EdgeInsets.fromLTRB(sideInset, 2, sideInset, 2),
+      child: Column(
+        children: _fetchedBetList.asMap().entries.map((entry) {
+          final index = entry.key;
+          final bet = entry.value;
+          final betNumbersDisplay = _betNumbersDisplayForReceipt(bet);
+          final conditionsDisplay = bet.selectedConditions
+              .where((condition) => !['4P', '7P'].contains(condition))
+              .join(' ');
+
+          return Container(
+            key: ValueKey('${t.id}_bet_row_${bet.id}_$index'),
+            width: tableWidth,
+            padding: const EdgeInsets.symmetric(vertical: 5),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: t.rowTextColor.withOpacity(0.15),
+                  width: 0.5,
+                ),
+              ),
+            ),
+            child: _buildImageBetRow(
+              tableWidth: tableWidth,
+              no: '${index + 1}',
+              number: betNumbersDisplay,
+              amount: '${bet.amountPerNumber}',
+              post: conditionsDisplay.isNotEmpty ? conditionsDisplay : '-',
+              total: '${bet.totalAmount}',
+              numberBold: true,
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildImageBetRow({
+    required double tableWidth,
+    required String no,
+    required String number,
+    required String amount,
+    required String post,
+    required String total,
+    bool numberBold = false,
+  }) {
+    final t = _tpl;
+    final values = [no, number, amount, post, total];
+    final weights = [
+      FontWeight.w600,
+      FontWeight.bold,
+      FontWeight.w500,
+      FontWeight.w500,
+      FontWeight.bold,
+    ];
+    final sizes = t.fonts.rowColumns;
+
+    return Row(
+      children: List.generate(5, (i) {
+        final nudgePostOrTotal = i == 3 || i == 4;
+        final colWidth = tableWidth * t.colFractions[i];
+
+        if (i == 3) {
+          final postFontSize = t.fonts.postFontSizeFor(post);
+          return SizedBox(
+            width: colWidth,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 10),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Text(
+                  post,
+                  maxLines: 1,
+                  softWrap: false,
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    fontSize: postFontSize,
+                    color: t.rowTextColor,
+                    fontWeight: FontWeight.w500,
+                    height: 1.0,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+
+        return SizedBox(
+          width: colWidth,
+          child: Padding(
+            padding: nudgePostOrTotal
+                ? const EdgeInsets.only(left: 10)
+                : EdgeInsets.zero,
+            child: Text(
+              values[i],
+              textAlign: nudgePostOrTotal ? TextAlign.right : TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: sizes[i],
+                color: t.rowTextColor,
+                fontWeight: numberBold && i == 1 ? FontWeight.bold : weights[i],
+                height: 1.15,
+              ),
+            ),
+          ),
+        );
+      }),
     );
   }
 
@@ -374,18 +728,30 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
               ),
               Expanded(
                 flex: 2,
-                child: Text(
-                  'ប៉ុស្តិ៍',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 10),
+                  child: Text(
+                    'ប៉ុស្តិ៍',
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
               ),
               Expanded(
                 flex: 2,
-                child: Text(
-                  'សរុប',
-                  textAlign: TextAlign.right,
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 10),
+                  child: Text(
+                    'សរុប',
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -408,7 +774,7 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
 
           return Container(
             key: ValueKey('bet_row_${bet.id}_$index'),
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 9),
             decoration: BoxDecoration(
               border: Border(
                 bottom: BorderSide(color: Colors.grey[300]!, width: 0.5),
@@ -421,7 +787,7 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
                   child: Text(
                     '${index + 1}',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 11),
+                    style: const TextStyle(fontSize: 9),
                   ),
                 ),
                 Expanded(
@@ -429,7 +795,7 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
                   child: Text(
                     betNumbersDisplay,
                     textAlign: TextAlign.left,
-                    style: const TextStyle(fontSize: 11),
+                    style: const TextStyle(fontSize: 9),
                   ),
                 ),
                 Expanded(
@@ -437,7 +803,7 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
                   child: Text(
                     '${bet.amountPerNumber}',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 11),
+                    style: const TextStyle(fontSize: 9),
                   ),
                 ),
                 Expanded(
@@ -445,7 +811,7 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
                   child: Text(
                     conditionsDisplay.isNotEmpty ? conditionsDisplay : '-',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 11),
+                    style: const TextStyle(fontSize: 7,)
                   ),
                 ),
                 Expanded(
@@ -454,7 +820,7 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
                     '${bet.totalAmount}',
                     textAlign: TextAlign.right,
                     style: const TextStyle(
-                      fontSize: 11,
+                      fontSize: 9,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -576,6 +942,31 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
     return '$displayHour:$minute $period';
   }
 
+  double _capturePixelRatio(double layoutHeight) {
+    const targetRatio = 3.0;
+    const maxPixels = 8192.0;
+    if (layoutHeight * targetRatio <= maxPixels) return targetRatio;
+    return maxPixels / layoutHeight;
+  }
+
+  /// Captures the full receipt PNG (all bet rows), including content below
+  /// the visible scroll area.
+  Future<Uint8List?> _captureReceiptPngBytes() async {
+    await WidgetsBinding.instance.endOfFrame;
+    await Future.delayed(const Duration(milliseconds: 300));
+
+    final boundary =
+        _repaintBoundaryKey.currentContext?.findRenderObject()
+            as RenderRepaintBoundary?;
+    if (boundary == null) return null;
+
+    final ratio = _capturePixelRatio(boundary.size.height);
+    final image = await boundary.toImage(pixelRatio: ratio);
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    image.dispose();
+    return byteData?.buffer.asUint8List();
+  }
+
   Future<void> _saveReceiptToPhone() async {
     try {
       // Show loading dialog
@@ -597,15 +988,9 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
         },
       );
 
-      // Wait a bit to ensure widget is fully rendered
-      await Future.delayed(const Duration(milliseconds: 500));
+      final Uint8List? pngBytes = await _captureReceiptPngBytes();
 
-      // Capture the widget as image
-      final RenderRepaintBoundary? boundary =
-          _repaintBoundaryKey.currentContext?.findRenderObject()
-              as RenderRepaintBoundary?;
-
-      if (boundary == null) {
+      if (pngBytes == null) {
         Navigator.of(context).pop();
         Get.snackbar(
           'កំហុស',
@@ -615,24 +1000,6 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
         );
         return;
       }
-
-      ui.Image image = await boundary.toImage(pixelRatio: 3.0);
-      ByteData? byteData = await image.toByteData(
-        format: ui.ImageByteFormat.png,
-      );
-
-      if (byteData == null) {
-        Navigator.of(context).pop();
-        Get.snackbar(
-          'កំហុស',
-          'មិនអាចបំប្លែងជារូបភាពបាន',
-          backgroundColor: Colors.red,
-          colorText: Colors.white,
-        );
-        return;
-      }
-
-      Uint8List pngBytes = byteData.buffer.asUint8List();
 
       // Save to temporary directory first
       final Directory tempDir = await getTemporaryDirectory();

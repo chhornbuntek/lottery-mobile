@@ -20,6 +20,7 @@ class _BettingScreenState extends State<BettingScreen> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _betNumberController = TextEditingController();
   final TextEditingController _amountController = TextEditingController();
+  final ScrollController _betListScrollController = ScrollController();
   final String _selectedBill = 'ល.រ';
   LotteryTime? _selectedLotteryTime;
   List<String> _expandedNumbers = [];
@@ -55,6 +56,25 @@ class _BettingScreenState extends State<BettingScreen> {
 
   String _createGroupToken() {
     return DateTime.now().microsecondsSinceEpoch.toString();
+  }
+
+  void _scrollBetListToBottom() {
+    void scrollToEnd() {
+      if (!_betListScrollController.hasClients) return;
+      final maxExtent = _betListScrollController.position.maxScrollExtent;
+      if (maxExtent <= 0) return;
+      _betListScrollController.animateTo(
+        maxExtent,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+    }
+
+    // Two frames so maxScrollExtent is correct after the new row lays out.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      scrollToEnd();
+      WidgetsBinding.instance.addPostFrameCallback((_) => scrollToEnd());
+    });
   }
 
   void _onKeypadPressed(String value) {
@@ -780,6 +800,7 @@ class _BettingScreenState extends State<BettingScreen> {
       _betList.add(newBet);
       _totalAmount = _calculateTotalAmount();
     });
+    _scrollBetListToBottom();
 
     // Store in pending bets table and track ID
     try {
@@ -1515,6 +1536,7 @@ class _BettingScreenState extends State<BettingScreen> {
           if (_betList.isNotEmpty)
             Expanded(
               child: SingleChildScrollView(
+                controller: _betListScrollController,
                 child: Column(
                   children: _groupBetsByCustomerTime().entries.map((entry) {
                     final bets = entry.value;
@@ -2360,6 +2382,7 @@ class _BettingScreenState extends State<BettingScreen> {
           const SizedBox(height: 8),
           Expanded(
             child: SingleChildScrollView(
+              controller: _betListScrollController,
               child: Column(
                 children: _groupBetsToEditByCustomerTime().entries.map((entry) {
                   final bets = entry.value;
@@ -3322,6 +3345,7 @@ class _BettingScreenState extends State<BettingScreen> {
             'group_token': pendingBet.groupToken ?? groupToken,
           });
         });
+        _scrollBetListToBottom();
 
         // Clear only bet numbers and amount, keep customer name, time, and conditions
         _clearFormPartial();
@@ -3373,6 +3397,7 @@ class _BettingScreenState extends State<BettingScreen> {
     _nameController.dispose();
     _betNumberController.dispose();
     _amountController.dispose();
+    _betListScrollController.dispose();
     super.dispose();
   }
 }

@@ -7,7 +7,7 @@ class SupabaseConfig {
   static const String appBuildLabel = '1.0.1+5';
 
   /// Set to `branch1`, `branch2`, or `branch3` — no build flags needed.
-  static const String activeBranch = 'branch1';
+  static const String activeBranch = 'branch3';
 
   static String get supabaseUrl {
     switch (activeBranch) {

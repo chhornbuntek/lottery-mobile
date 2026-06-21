@@ -525,7 +525,11 @@ class _BettingScreenState extends State<BettingScreen> {
     String lotteryTimeName,
     List<String> selectedConditions,
   ) async {
-    return checkClosedPostsFromDb(lotteryTimeName, selectedConditions);
+    return checkClosedPostsFromDb(
+      lotteryTimeName,
+      selectedConditions,
+      forModifications: false,
+    );
   }
 
   void _showTopErrorSnackBar(String message) {
@@ -3389,7 +3393,11 @@ class _BettingScreenState extends State<BettingScreen> {
 
   /// DB-only close check for pay / edit / cancel.
   Future<String?> _checkIfBettingClosed(List<dynamic> bets) async {
-    return checkIfBetsClosedFromDb(bets);
+    return checkIfBetsClosedFromDb(
+      bets,
+      forModifications: true,
+      fallbackLotteryTime: _selectedLotteryTime?.timeName,
+    );
   }
 
   @override
@@ -3431,44 +3439,140 @@ String _weekdayNameFromDate(DateTime now) {
 }
 
 String? _daySpecificTimeForPost(ClosingTimePost post, String dayName) {
+  String? raw;
   switch (dayName) {
     case 'monday':
-      return post.monday;
+      raw = post.monday;
+      break;
     case 'tuesday':
-      return post.tuesday;
+      raw = post.tuesday;
+      break;
     case 'wednesday':
-      return post.wednesday;
+      raw = post.wednesday;
+      break;
     case 'thursday':
-      return post.thursday;
+      raw = post.thursday;
+      break;
     case 'friday':
-      return post.friday;
+      raw = post.friday;
+      break;
     case 'saturday':
-      return post.saturday;
+      raw = post.saturday;
+      break;
     case 'sunday':
-      return post.sunday;
+      raw = post.sunday;
+      break;
     default:
       return null;
   }
+  if (raw == null) return null;
+  final t = raw.trim();
+  if (t.isEmpty || t == '-') return null;
+  return t;
+}
+
+/// Match bet condition `A` with DB post `[A]`, etc.
+String _normalizePostId(String id) {
+  var s = id.trim();
+  if (s.startsWith('[') && s.endsWith(']') && s.length > 2) {
+    s = s.substring(1, s.length - 1);
+  }
+  return s.toUpperCase();
+}
+
+String _normalizeLotteryTimeName(String name) {
+  return name.trim().replaceAll(RegExp(r'\s+'), ' ');
+}
+
+int? _parseClockToMinutes(String? timeStr) {
+  if (timeStr == null) return null;
+  final t = timeStr.trim();
+  if (t.isEmpty || t == '-') return null;
+  final parts = t.split(':');
+  if (parts.length < 2) return null;
+  final hour = int.tryParse(parts[0].trim());
+  final minute = int.tryParse(parts[1].trim());
+  if (hour == null || minute == null) return null;
+  return hour * 60 + minute;
+}
+
+ClosingTime? _findClosingTimeForLottery(
+  List<ClosingTime> closingTimes,
+  String lotteryTimeName,
+) {
+  final target = _normalizeLotteryTimeName(lotteryTimeName).toLowerCase();
+  for (final ct in closingTimes) {
+    if (_normalizeLotteryTimeName(ct.timeName).toLowerCase() == target) {
+      return ct;
+    }
+  }
+  return null;
+}
+
+ClosingTimePost? _findClosingPost(
+  List<ClosingTimePost> posts,
+  String condition,
+) {
+  final target = _normalizePostId(condition);
+  for (final p in posts) {
+    if (_normalizePostId(p.postId) == target) {
+      return p;
+    }
+  }
+  return null;
+}
+
+bool _isPostClosedNow({
+  required int currentMinutes,
+  required int endMinutes,
+  required int daySpecificMinutes,
+  required bool forModifications,
+}) {
+  if (forModifications) {
+    if (endMinutes < daySpecificMinutes) {
+      return currentMinutes <= endMinutes ||
+          currentMinutes >= daySpecificMinutes;
+    }
+    return currentMinutes >= daySpecificMinutes;
+  }
+
+  bool isBeforeStart;
+  if (endMinutes < daySpecificMinutes) {
+    isBeforeStart = currentMinutes <= endMinutes;
+  } else {
+    isBeforeStart = false;
+  }
+
+  bool isAfterClosing;
+  if (endMinutes < daySpecificMinutes) {
+    isAfterClosing = currentMinutes >= daySpecificMinutes;
+  } else {
+    isAfterClosing =
+        currentMinutes >= daySpecificMinutes && currentMinutes <= endMinutes;
+  }
+
+  return isBeforeStart || isAfterClosing;
 }
 
 /// DB-only close check: `closing_time` + `closing_time_posts` per day/post.
 /// Returns post ids (conditions) that are closed right now.
 /// Missing/incomplete DB config is treated as open (not blocked).
+///
+/// [forModifications]: when true (pay / cancel pay / edit), stay closed after
+/// post closing time even past [ClosingTime.endTime]. New bets use false.
 Future<List<String>> checkClosedPostsFromDb(
   String lotteryTimeName,
-  List<String> selectedConditions,
-) async {
+  List<String> selectedConditions, {
+  bool forModifications = false,
+}) async {
   if (selectedConditions.isEmpty) return [];
 
   try {
     final closingTimes = await ClosingTimeService.getAllClosingTimes();
-    ClosingTime? closingTime;
-    for (final ct in closingTimes) {
-      if (ct.timeName == lotteryTimeName) {
-        closingTime = ct;
-        break;
-      }
-    }
+    final closingTime = _findClosingTimeForLottery(
+      closingTimes,
+      lotteryTimeName,
+    );
 
     if (closingTime == null ||
         closingTime.id == 0 ||
@@ -3482,66 +3586,34 @@ Future<List<String>> checkClosedPostsFromDb(
     final currentTime = TimeOfDay.fromDateTime(now);
     final currentMinutes = currentTime.hour * 60 + currentTime.minute;
 
-    final endTimeParts = closingTime.endTime.split(':');
-    if (endTimeParts.length < 2) {
+    final endMinutes = _parseClockToMinutes(closingTime.endTime);
+    if (endMinutes == null) {
       return [];
     }
-    final endMinutes =
-        (int.tryParse(endTimeParts[0]) ?? 0) * 60 +
-        (int.tryParse(endTimeParts[1]) ?? 0);
 
     final closedPosts = <String>[];
 
     for (final condition in selectedConditions) {
-      ClosingTimePost? post;
-      for (final p in closingTime.posts) {
-        if (p.postId.toUpperCase() == condition.toUpperCase()) {
-          post = p;
-          break;
-        }
-      }
+      final post = _findClosingPost(closingTime.posts, condition);
 
       if (post == null) {
-        // If this post is not configured in DB for this lottery time,
-        // do not block it here.
         continue;
       }
 
       final daySpecificTimeStr = _daySpecificTimeForPost(post, dayName);
-      if (daySpecificTimeStr == null || daySpecificTimeStr.isEmpty) {
-        // Missing day config for this post/day -> treat as open (not blocked).
+      final daySpecificMinutes = _parseClockToMinutes(daySpecificTimeStr);
+      if (daySpecificMinutes == null) {
         continue;
       }
 
-      final timeParts = daySpecificTimeStr.split(':');
-      if (timeParts.length < 2) {
-        continue;
-      }
+      final isClosed = _isPostClosedNow(
+        currentMinutes: currentMinutes,
+        endMinutes: endMinutes,
+        daySpecificMinutes: daySpecificMinutes,
+        forModifications: forModifications,
+      );
 
-      final parsedHour = int.tryParse(timeParts[0]);
-      final parsedMinute = int.tryParse(timeParts[1]);
-      if (parsedHour == null || parsedMinute == null) {
-        continue;
-      }
-      final daySpecificMinutes = parsedHour * 60 + parsedMinute;
-
-      bool isBeforeStart;
-      if (endMinutes < daySpecificMinutes) {
-        isBeforeStart = currentMinutes <= endMinutes;
-      } else {
-        isBeforeStart = false;
-      }
-
-      bool isAfterClosing;
-      if (endMinutes < daySpecificMinutes) {
-        isAfterClosing = currentMinutes >= daySpecificMinutes;
-      } else {
-        isAfterClosing =
-            currentMinutes >= daySpecificMinutes &&
-            currentMinutes <= endMinutes;
-      }
-
-      if (isBeforeStart || isAfterClosing) {
+      if (isClosed) {
         closedPosts.add(condition);
       }
     }
@@ -3554,7 +3626,11 @@ Future<List<String>> checkClosedPostsFromDb(
 }
 
 /// DB-only: returns Khmer error message if any bet's posts are closed, else null.
-Future<String?> checkIfBetsClosedFromDb(List<dynamic> bets) async {
+Future<String?> checkIfBetsClosedFromDb(
+  List<dynamic> bets, {
+  bool forModifications = true,
+  String? fallbackLotteryTime,
+}) async {
   if (bets.isEmpty) return null;
 
   try {
@@ -3570,16 +3646,22 @@ Future<String?> checkIfBetsClosedFromDb(List<dynamic> bets) async {
         selectedConditions = bet.selectedConditions;
       } else if (bet is Map<String, dynamic>) {
         lotteryTime = bet['lottery_time'] as String? ?? '';
+        if (lotteryTime.trim().isEmpty &&
+            fallbackLotteryTime != null &&
+            fallbackLotteryTime.trim().isNotEmpty) {
+          lotteryTime = fallbackLotteryTime.trim();
+        }
         selectedConditions =
             bet['selected_conditions'] as List<dynamic>? ?? [];
       }
 
       if (lotteryTime.isEmpty) continue;
 
+      lotteryTime = _normalizeLotteryTimeName(lotteryTime);
       lotteryTimesToCheck.add(lotteryTime);
       postsByLotteryTime.putIfAbsent(lotteryTime, () => {});
       for (final condition in selectedConditions) {
-        final conditionStr = condition.toString().toUpperCase();
+        final conditionStr = _normalizePostId(condition.toString());
         if (conditionStr != '4P' && conditionStr != '7P') {
           postsByLotteryTime[lotteryTime]!.add(conditionStr);
         }
@@ -3599,6 +3681,7 @@ Future<String?> checkIfBetsClosedFromDb(List<dynamic> bets) async {
       final closedPosts = await checkClosedPostsFromDb(
         lotteryTimeName,
         conditions,
+        forModifications: forModifications,
       );
       if (closedPosts.isNotEmpty) {
         return 'ម៉ោងឆ្នោត $lotteryTimeName (ប៉ុស្តិ៍ ${closedPosts.join(', ')}) បានបិទហើយ! មិនអាចបង់ប្រាក់បានទេ';
@@ -3733,6 +3816,12 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
   final Set<String> _expandedGroups = {};
   // Track which bets are being edited
   final Set<int> _editingBetIds = {};
+  /// True when selected group(s) are past closing — only print allowed.
+  bool _modificationsBlocked = false;
+  bool _checkingModificationsBlocked = false;
+
+  bool get _actionsBlocked =>
+      _modificationsBlocked || _checkingModificationsBlocked;
   // Controllers for edit forms
   final Map<int, TextEditingController> _editCustomerNameControllers = {};
   final Map<int, TextEditingController> _editBetNumbersControllers = {};
@@ -3810,18 +3899,68 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
     };
   }
 
+  /// DB-only close check for pay / edit / cancel.
+  Future<String?> _checkIfBettingClosed(List<dynamic> bets) async {
+    return checkIfBetsClosedFromDb(
+      bets,
+      forModifications: true,
+      fallbackLotteryTime: widget.lotteryTime,
+    );
+  }
+
+  Future<void> _updateModificationsBlocked() async {
+    if (_selectedGroups.isEmpty) {
+      if ((_modificationsBlocked || _checkingModificationsBlocked) && mounted) {
+        setState(() {
+          _modificationsBlocked = false;
+          _checkingModificationsBlocked = false;
+        });
+      }
+      return;
+    }
+
+    if (mounted) {
+      setState(() => _checkingModificationsBlocked = true);
+    }
+
+    final groupedBets = _groupBetsByCustomerTime();
+    final betsToCheck = <dynamic>[];
+    for (final key in _selectedGroups) {
+      betsToCheck.addAll(groupedBets[key] ?? []);
+    }
+
+    final closedMessage = await _checkIfBettingClosed(betsToCheck);
+    final blocked = closedMessage != null;
+    if (!mounted) return;
+    setState(() {
+      _checkingModificationsBlocked = false;
+      _modificationsBlocked = blocked;
+      if (blocked) {
+        _selectedBetIds.clear();
+        _editingBetIds.clear();
+      }
+    });
+  }
+
   /// Toggle group selection (allow selecting only one group at a time for editing)
   void _toggleGroupSelection(String groupKey) {
     setState(() {
       if (_selectedGroups.contains(groupKey)) {
         // Deselect if already selected
         _selectedGroups.remove(groupKey);
+        _modificationsBlocked = false;
+        _checkingModificationsBlocked = false;
+        _selectedBetIds.clear();
+        _editingBetIds.clear();
       } else {
         // Clear all selections and select only this one (single selection)
         _selectedGroups.clear();
         _selectedGroups.add(groupKey);
+        _selectedBetIds.clear();
+        _editingBetIds.clear();
       }
     });
+    _updateModificationsBlocked();
   }
 
   /// Toggle group expansion (to show individual bets)
@@ -3837,6 +3976,23 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
 
   /// Toggle individual bet selection
   void _toggleBetSelection(int betId) {
+    if (_actionsBlocked) {
+      _showTopErrorSnackBar(
+        'ម៉ោងឆ្នោតបានបិទហើយ — មិនអាចកែប្រែបានទេ (បោះពុម្ពប័ណ្ណបានតែប៉ុណ្ណោះ)',
+      );
+      return;
+    }
+
+    final bet = _bets.firstWhere(
+      (b) => (b['id'] as int?) == betId,
+      orElse: () => {},
+    );
+    if (bet.isNotEmpty &&
+        (bet['source'] as String? ?? '') != 'pending_bets') {
+      _showTopErrorSnackBar('ភ្នាល់បានបង់ប្រាក់រួច មិនអាចកែប្រែបានទេ');
+      return;
+    }
+
     setState(() {
       if (_selectedBetIds.contains(betId)) {
         _selectedBetIds.remove(betId);
@@ -3934,6 +4090,27 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
         duration: const Duration(seconds: 4),
         behavior: SnackBarBehavior.floating,
         margin: EdgeInsets.fromLTRB(12, 0, 12, bottomMargin),
+      ),
+    );
+  }
+
+  Widget _closedForModificationsBanner() {
+    if (!_modificationsBlocked) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.orange.shade50,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.orange.shade200),
+        ),
+        child: Text(
+          'ម៉ោងឆ្នោតបានបិទហើយ — បោះពុម្ពប័ណ្ណបានតែប៉ុណ្ណោះ',
+          style: TextStyle(fontSize: 13, color: Colors.orange.shade900),
+          textAlign: TextAlign.center,
+        ),
       ),
     );
   }
@@ -4130,11 +4307,6 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
     }
 
     return betIds;
-  }
-
-  /// DB-only close check for pay / edit / cancel.
-  Future<String?> _checkIfBettingClosed(List<dynamic> bets) async {
-    return checkIfBetsClosedFromDb(bets);
   }
 
   /// Show receipt preview for selected groups
@@ -4776,8 +4948,12 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
                                             ),
                                             Checkbox(
                                               value: isBetSelected,
-                                              onChanged: (value) =>
-                                                  _toggleBetSelection(betId),
+                                              onChanged: _actionsBlocked
+                                                  ? null
+                                                  : (value) =>
+                                                      _toggleBetSelection(
+                                                        betId,
+                                                      ),
                                               activeColor: markColor,
                                               materialTapTargetSize:
                                                   MaterialTapTargetSize
@@ -4823,7 +4999,7 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
                                       ],
                                     ),
                                     // Edit form (inline, shown when bet is selected)
-                                    if (isBetEditing) ...[
+                                    if (isBetEditing && !_actionsBlocked) ...[
                                       const SizedBox(height: 12),
                                       const Divider(),
                                       const SizedBox(height: 12),
@@ -4979,6 +5155,7 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
                     child: SafeArea(
                       child: Column(
                         children: [
+                          _closedForModificationsBanner(),
                           // Print button (for all selected groups)
                           SizedBox(
                             width: double.infinity,
@@ -5014,7 +5191,7 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
                             ),
                           ),
                           // Pay button (only for groups with pending bets)
-                          if (hasPendingBets) ...[
+                          if (hasPendingBets && !_actionsBlocked) ...[
                             const SizedBox(height: 12),
                             SizedBox(
                               width: double.infinity,
@@ -5067,7 +5244,7 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
                             ),
                           ],
                           // Cancel Payment button (only for groups with paid bets)
-                          if (hasPaidBets) ...[
+                          if (hasPaidBets && !_actionsBlocked) ...[
                             if (hasPendingBets) const SizedBox(height: 12),
                             SizedBox(
                               width: double.infinity,
@@ -5173,8 +5350,9 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
                   child: SafeArea(
                     child: Column(
                       children: [
+                        _closedForModificationsBanner(),
                         // Edit button - only for single unpaid group (pending bets)
-                        if (hasPendingBetsToEdit)
+                        if (hasPendingBetsToEdit && !_actionsBlocked)
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton(
@@ -5287,7 +5465,8 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
                           ),
                         ),
                         // Save button (only shown when bets are being edited)
-                        if (_editingBetIds.isNotEmpty) ...[
+                        if (_editingBetIds.isNotEmpty &&
+                            !_actionsBlocked) ...[
                           const SizedBox(height: 12),
                           SizedBox(
                             width: double.infinity,
@@ -5334,7 +5513,7 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
                           ),
                         ],
                         // Pay button (only for groups with pending bets)
-                        if (hasPendingBets) ...[
+                        if (hasPendingBets && !_actionsBlocked) ...[
                           const SizedBox(height: 12),
                           SizedBox(
                             width: double.infinity,
@@ -5387,7 +5566,7 @@ class _BetsBottomSheetState extends State<_BetsBottomSheet> {
                           ),
                         ],
                         // Cancel Payment button (only for paid groups)
-                        if (hasPaidBetsForCancel) ...[
+                        if (hasPaidBetsForCancel && !_actionsBlocked) ...[
                           const SizedBox(height: 12),
                           SizedBox(
                             width: double.infinity,

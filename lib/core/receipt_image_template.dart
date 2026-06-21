@@ -131,42 +131,42 @@ class ImageReceiptTemplate {
       top: 0.38,
       width: 0.3,
       height: 0.10,
-      fontSize: 15,
+      fontSize: 12,
     ),
     billField: ReceiptFieldRect(
       left: 0.20,
       top: 0.62,
       width: 0.24,
       height: 0.10,
-      fontSize: 15,
+      fontSize: 12,
     ),
     dateField: ReceiptFieldRect(
       left: 0.66,
       top: 0.37,
       width: 0.30,
       height: 0.10,
-      fontSize: 15
+      fontSize: 12
     ),
     lotteryField: ReceiptFieldRect(
       left: 0.66,
       top: 0.62,
       width: 0.30,
       height: 0.10,
-      fontSize: 15,
+      fontSize: 12,
     ),
     agentField: ReceiptFieldRect(
       left: 0.11,
       top: 0.08,
       width: 0.26,
       height: 0.32,
-      fontSize: 13,
+      fontSize: 12,
     ),
     entryTimeField: ReceiptFieldRect(
       left: 0.44,
       top: 0.08,
       width: 0.22,
       height: 0.32,
-      fontSize: 13,
+      fontSize: 12,
     ),
     totalField: ReceiptFieldRect(
       left: 0.70,

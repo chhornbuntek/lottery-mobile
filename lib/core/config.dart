@@ -1,16 +1,18 @@
 import 'receipt_image_template.dart';
 
 /// Supabase: switch backend by changing [activeBranch] only
-/// (`branch1`, `branch2`, or `branch3`).
+/// (`branch1`, `branch2`, `branch3`, or `branch4`).
 class SupabaseConfig {
   /// Visible app build label for QA/client verification.
-  static const String appBuildLabel = '1.0.1+5';
+  static const String appBuildLabel = '1.0.1+6';
 
-  /// Set to `branch1`, `branch2`, or `branch3` — no build flags needed.
-  static const String activeBranch = 'branch3';
+  /// Set to `branch1`, `branch2`, `branch3`, or `branch4` — no build flags needed.
+  static const String activeBranch = 'branch4';
 
   static String get supabaseUrl {
     switch (activeBranch) {
+      case 'branch4':
+        return _branch4Url;
       case 'branch3':
         return _branch3Url;
       case 'branch2':
@@ -23,6 +25,8 @@ class SupabaseConfig {
 
   static String get supabaseAnonKey {
     switch (activeBranch) {
+      case 'branch4':
+        return _branch4AnonKey;
       case 'branch3':
         return _branch3AnonKey;
       case 'branch2':
@@ -45,11 +49,16 @@ class SupabaseConfig {
   static const String _branch3AnonKey =
       'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzc3Mzk1NjAwLCJleHAiOjE5MzUxNjIwMDB9.fnp-WwRsGfpFpbLPjqkjXLFEsO4pLehx1isgjP6vjyc';
 
+  static const String _branch4Url = 'https://supabase-branch4.adminlot.site';
+  static const String _branch4AnonKey =
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzgyOTE2NjcwLCJleHAiOjE5NDA1OTY2NzB9.l4tZ5NzMIE0Y-UEBeff_e7KqaLaZeo5gJUlcWZzOBis';
+
   /// Receipt header logo in `assets/` (add the file for branch3 — e.g. `logo-branch3.jpg`).
   static String get receiptLogoAsset {
     switch (activeBranch) {
       case 'branch3':
         return 'assets/logo-branch3.jpg';
+      case 'branch4':
       case 'branch2':
       case 'branch1':
       default:
@@ -57,7 +66,8 @@ class SupabaseConfig {
     }
   }
 
-  /// branch1 / branch3 use full-width header/footer images with bet rows in between.
+  /// branch1 / branch3 / branch4 → image header/footer receipt.
+  /// branch2 → original code-designed receipt (logo + table + footer).
   static bool get usesImageReceiptTemplate => imageReceiptTemplate != null;
 
   static ImageReceiptTemplate? get imageReceiptTemplate =>

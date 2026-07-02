@@ -155,6 +155,7 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
+          // branch1 / branch3 / branch4 → image receipt; branch2 → code receipt
           : SupabaseConfig.usesImageReceiptTemplate
           ? _buildImageReceiptPreviewBody(context)
           : SingleChildScrollView(
@@ -237,7 +238,7 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
           const SizedBox(height: 24),
           const Divider(thickness: 1),
           const SizedBox(height: 16),
-          _buildBetTable(),
+          _buildCodeReceiptBetTable(),
           const SizedBox(height: 24),
           _buildFooter(now),
         ],
@@ -273,14 +274,14 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
           imageWidth: width,
           imageHeight: height,
           text: firstBet.customerName,
-          color: t.fieldTextColor,
+          color: t.headerBarTextColor ?? t.fieldTextColor,
         ),
         _imageFieldBox(
           rect: t.billField,
           imageWidth: width,
           imageHeight: height,
           text: _billNumber(firstBet),
-          color: t.fieldTextColor,
+          color: t.headerBarTextColor ?? t.fieldTextColor,
         ),
         _imageFieldBox(
           rect: t.dateField,
@@ -318,7 +319,7 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
               imageWidth: width,
               imageHeight: height,
               text: _getCurrentUserName(),
-              color: Colors.white,
+              color: t.footerAgentColor,
               fontWeight: FontWeight.w600,
             ),
           _imageFieldBox(
@@ -326,7 +327,7 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
             imageWidth: width,
             imageHeight: height,
             text: _formatCambodiaTime(now),
-            color: Colors.white,
+            color: t.footerEntryTimeColor,
             fontWeight: FontWeight.w600,
           ),
           _imageFieldBox(
@@ -334,7 +335,7 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
             imageWidth: width,
             imageHeight: height,
             text: totalText,
-            color: Colors.white,
+            color: t.totalFieldColor,
             digitCount: totalDigits,
             fontWeight: FontWeight.bold,
             alignment: Alignment.center,
@@ -450,6 +451,7 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
     );
   }
 
+  /// Bet rows for branch1 / branch3 / branch4 image receipt — styles from [ImageReceiptTemplate].
   Widget _buildImageBetRows(double receiptWidth) {
     final t = _tpl;
     final tableWidth = receiptWidth * 0.96;
@@ -519,20 +521,72 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
         final nudgePostOrTotal = i == 3 || i == 4;
         final colWidth = tableWidth * t.colFractions[i];
 
+        final colLeftPad = t.rowColumnLeftPad[i];
+
+        if (i == 2) {
+          return SizedBox(
+            width: colWidth,
+            child: Transform.translate(
+              offset: Offset(colLeftPad, 0),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.center,
+                child: Text(
+                  amount,
+                  maxLines: 1,
+                  softWrap: false,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: sizes[i],
+                    color: t.rowTextColor,
+                    fontWeight: weights[i],
+                    height: 1.15,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+
+        if (i == 1) {
+          return SizedBox(
+            width: colWidth,
+            child: Transform.translate(
+              offset: Offset(colLeftPad, 0),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.center,
+                child: Text(
+                  number,
+                  maxLines: 1,
+                  softWrap: false,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: sizes[i],
+                    color: t.rowTextColor,
+                    fontWeight: FontWeight.bold,
+                    height: 1.15,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+
         if (i == 3) {
           final postFontSize = t.fonts.postFontSizeFor(post);
           return SizedBox(
             width: colWidth,
-            child: Padding(
-              padding: const EdgeInsets.only(left: 10),
+            child: Transform.translate(
+              offset: Offset(colLeftPad, 0),
               child: FittedBox(
                 fit: BoxFit.scaleDown,
-                alignment: Alignment.centerRight,
+                alignment: Alignment.center,
                 child: Text(
                   post,
                   maxLines: 1,
                   softWrap: false,
-                  textAlign: TextAlign.right,
+                  textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: postFontSize,
                     color: t.rowTextColor,
@@ -548,9 +602,9 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
         return SizedBox(
           width: colWidth,
           child: Padding(
-            padding: nudgePostOrTotal
-                ? const EdgeInsets.only(left: 10)
-                : EdgeInsets.zero,
+            padding: EdgeInsets.only(
+              left: colLeftPad + (nudgePostOrTotal ? 10 : 0),
+            ),
             child: Text(
               values[i],
               textAlign: nudgePostOrTotal ? TextAlign.right : TextAlign.center,
@@ -689,7 +743,8 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
     );
   }
 
-  Widget _buildBetTable() {
+  /// Bet rows for branch2 code receipt only — not used by image template.
+  Widget _buildCodeReceiptBetTable() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -728,30 +783,18 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
               ),
               Expanded(
                 flex: 2,
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 10),
-                  child: Text(
-                    'ប៉ុស្តិ៍',
-                    textAlign: TextAlign.right,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                child: Text(
+                  'ប៉ុស្តិ៍',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                 ),
               ),
               Expanded(
                 flex: 2,
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 10),
-                  child: Text(
-                    'សរុប',
-                    textAlign: TextAlign.right,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                child: Text(
+                  'សរុប',
+                  textAlign: TextAlign.right,
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                 ),
               ),
             ],
@@ -765,7 +808,10 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
           int index = entry.key;
           BetData bet = entry.value;
 
-          final betNumbersDisplay = _betNumbersDisplayForReceipt(bet);
+          String betNumbersDisplay = bet.betNumbers.join(', ');
+          if (bet.betNumbers.length > 10) {
+            betNumbersDisplay = '${bet.betNumbers.take(10).join(', ')}...';
+          }
 
           // Format conditions (filter out 4P and 7P shortcuts)
           final conditionsDisplay = bet.selectedConditions
@@ -774,7 +820,7 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
 
           return Container(
             key: ValueKey('bet_row_${bet.id}_$index'),
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 9),
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
             decoration: BoxDecoration(
               border: Border(
                 bottom: BorderSide(color: Colors.grey[300]!, width: 0.5),
@@ -787,7 +833,7 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
                   child: Text(
                     '${index + 1}',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 9),
+                    style: const TextStyle(fontSize: 11),
                   ),
                 ),
                 Expanded(
@@ -795,7 +841,7 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
                   child: Text(
                     betNumbersDisplay,
                     textAlign: TextAlign.left,
-                    style: const TextStyle(fontSize: 9),
+                    style: const TextStyle(fontSize: 11),
                   ),
                 ),
                 Expanded(
@@ -803,7 +849,7 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
                   child: Text(
                     '${bet.amountPerNumber}',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 9),
+                    style: const TextStyle(fontSize: 11),
                   ),
                 ),
                 Expanded(
@@ -811,7 +857,7 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
                   child: Text(
                     conditionsDisplay.isNotEmpty ? conditionsDisplay : '-',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 7,)
+                    style: const TextStyle(fontSize: 11),
                   ),
                 ),
                 Expanded(
@@ -820,7 +866,7 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
                     '${bet.totalAmount}',
                     textAlign: TextAlign.right,
                     style: const TextStyle(
-                      fontSize: 9,
+                      fontSize: 11,
                       fontWeight: FontWeight.bold,
                     ),
                   ),

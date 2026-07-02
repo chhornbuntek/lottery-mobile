@@ -61,6 +61,8 @@ class ImageReceiptTemplate {
   final double footerWidth;
   final double footerHeight;
   final Color fieldTextColor;
+  /// Name + bill on dark header bars; defaults to [fieldTextColor].
+  final Color? headerBarTextColor;
   final Color rowBackgroundColor;
   final Color rowTextColor;
   final List<double> colFractions;
@@ -73,7 +75,12 @@ class ImageReceiptTemplate {
   final ReceiptFieldRect? agentField;
   final ReceiptFieldRect? branchField;
   final Color? agentTextColor;
+  final Color footerAgentColor;
+  final Color footerEntryTimeColor;
+  final Color totalFieldColor;
   final ReceiptFontSizes fonts;
+  /// Extra left padding per bet row column (ល.រ, លេខ, ចាក់, ប៉ុស្តិ៍, សរុប).
+  final List<double> rowColumnLeftPad;
 
   const ImageReceiptTemplate({
     required this.id,
@@ -84,6 +91,7 @@ class ImageReceiptTemplate {
     required this.footerWidth,
     required this.footerHeight,
     required this.fieldTextColor,
+    this.headerBarTextColor,
     required this.rowBackgroundColor,
     required this.rowTextColor,
     required this.colFractions,
@@ -96,7 +104,11 @@ class ImageReceiptTemplate {
     this.agentField,
     this.branchField,
     this.agentTextColor,
+    this.footerAgentColor = Colors.white,
+    this.footerEntryTimeColor = Colors.white,
+    this.totalFieldColor = Colors.white,
     this.fonts = const ReceiptFontSizes(),
+    this.rowColumnLeftPad = const [0, 0, 0, 0, 0],
   });
 
   double get headerAspect => headerWidth / headerHeight;
@@ -108,6 +120,9 @@ class ImageReceiptTemplate {
         return branch1;
       case 'branch3':
         return branch3;
+      case 'branch4':
+        return branch4;
+      // branch2 → null → code-designed receipt in receipt_preview.dart
       default:
         return null;
     }
@@ -249,6 +264,80 @@ class ImageReceiptTemplate {
     fonts: ReceiptFontSizes(
       rowColumns: [12, 12, 12, 11, 12],
       postByLength: [12, 11, 10, 9],
+    ),
+  );
+
+  // ── branch4 (header4.jpg 1280×600, bottom4.jpg 1280×568) ──
+  static const branch4 = ImageReceiptTemplate(
+    id: 'branch4',
+    headerAsset: 'assets/header4.jpg',
+    footerAsset: 'assets/bottom4.jpg',
+    headerWidth: 1280,
+    headerHeight: 600,
+    footerWidth: 1280,
+    footerHeight: 568,
+    fieldTextColor: Color(0xFF8B1A1A),
+    headerBarTextColor: Colors.white,
+    rowBackgroundColor: Color(0xFFFFF5E6),
+    rowTextColor: Color(0xFF8B1A1A),
+    colFractions: [0.09, 0.21, 0.17, 0.25, 0.28],
+    nameField: ReceiptFieldRect(
+      left: 0.33,
+      top: 0.39,
+      width: 0.26,
+      height: 0.09,
+      fontSize: 12,
+    ),
+    billField: ReceiptFieldRect(
+      left: 0.32,
+      top: 0.60,
+      width: 0.26,
+      height: 0.09,
+      fontSize: 12,
+    ),
+    dateField: ReceiptFieldRect(
+      left: 0.68,
+      top: 0.39,
+      width: 0.34,
+      height: 0.09,
+      fontSize: 12,
+    ),
+    lotteryField: ReceiptFieldRect(
+      left: 0.68,
+      top: 0.60,
+      width: 0.34,
+      height: 0.09,
+      fontSize: 12,
+    ),
+    agentField: ReceiptFieldRect(
+      left: 0.17,
+      top: 0.1,
+      width: 0.28,
+      height: 0.14,
+      fontSize: 12,
+    ),
+    entryTimeField: ReceiptFieldRect(
+      left: 0.42,
+      top: 0.1,
+      width: 0.22,
+      height: 0.14,
+      fontSize: 11,
+    ),
+    totalField: ReceiptFieldRect(
+      left: 0.58,
+      top: 0.28,
+      width: 0.36,
+      height: 0.52,
+      fontSize: 22,
+      fontSizesByDigits: [22, 20, 18, 16],
+    ),
+    footerAgentColor: Colors.white,
+    footerEntryTimeColor: Colors.white,
+    totalFieldColor: Color(0xFFC62828),
+    rowColumnLeftPad: [0, 45, 45, 40, 0],
+    fonts: ReceiptFontSizes(
+      rowColumns: [12, 12, 12, 11, 12],
+      postByLength: [11, 10, 10, 9],
     ),
   );
 }

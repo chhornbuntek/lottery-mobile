@@ -518,10 +518,30 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
 
     return Row(
       children: List.generate(5, (i) {
-        final nudgePostOrTotal = i == 3 || i == 4;
         final colWidth = tableWidth * t.colFractions[i];
-
         final colLeftPad = t.rowColumnLeftPad[i];
+
+        if (i == 0) {
+          return SizedBox(
+            width: colWidth,
+            child: Transform.translate(
+              offset: Offset(colLeftPad, 0),
+              child: Center(
+                child: Text(
+                  no,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: sizes[i],
+                    color: t.rowTextColor,
+                    fontWeight: weights[i],
+                    height: 1.15,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
 
         if (i == 2) {
           return SizedBox(
@@ -599,26 +619,32 @@ class _ReceiptPreviewState extends State<ReceiptPreview> {
           );
         }
 
-        return SizedBox(
-          width: colWidth,
-          child: Padding(
-            padding: EdgeInsets.only(
-              left: colLeftPad + (nudgePostOrTotal ? 10 : 0),
-            ),
-            child: Text(
-              values[i],
-              textAlign: nudgePostOrTotal ? TextAlign.right : TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: sizes[i],
-                color: t.rowTextColor,
-                fontWeight: numberBold && i == 1 ? FontWeight.bold : weights[i],
-                height: 1.15,
+        if (i == 4) {
+          return SizedBox(
+            width: colWidth,
+            child: Transform.translate(
+              offset: Offset(colLeftPad, 0),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.center,
+                child: Text(
+                  total,
+                  maxLines: 1,
+                  softWrap: false,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: sizes[i],
+                    color: t.rowTextColor,
+                    fontWeight: FontWeight.bold,
+                    height: 1.15,
+                  ),
+                ),
               ),
             ),
-          ),
-        );
+          );
+        }
+
+        return const SizedBox.shrink();
       }),
     );
   }

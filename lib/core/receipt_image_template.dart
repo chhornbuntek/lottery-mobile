@@ -334,10 +334,10 @@ class ImageReceiptTemplate {
     footerAgentColor: Colors.white,
     footerEntryTimeColor: Colors.white,
     totalFieldColor: Color(0xFFC62828),
-    rowColumnLeftPad: [0, 45, 45, 40, 0],
+    rowColumnLeftPad: [25, 45, 45, 40, 15],
     fonts: ReceiptFontSizes(
       rowColumns: [12, 12, 12, 11, 12],
-      postByLength: [11, 10, 10, 9],
+      postByLength: [12, 11, 10, 9],
     ),
   );
 }

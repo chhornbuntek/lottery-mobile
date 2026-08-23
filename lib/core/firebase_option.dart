@@ -38,7 +38,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '149613939533',
     projectId: 'lottery-3f88c',
     storageBucket: 'lottery-3f88c.firebasestorage.app',
-    iosBundleId: 'com.lottery.app',
+    iosBundleId: 'com.lottery.branch4',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
@@ -47,7 +47,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '149613939533',
     projectId: 'lottery-3f88c',
     storageBucket: 'lottery-3f88c.firebasestorage.app',
-    iosBundleId: 'com.lottery.app',
+    iosBundleId: 'com.lottery.branch4',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(

@@ -21,8 +21,18 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.lottery.app"
+        // Unique per branch so one device can install branch1, branch3, and branch4.
+        // Updated by: dart run tool/prepare_branch.dart
+        val branchFile = file("branch.properties")
+        applicationId = if (branchFile.exists()) {
+            branchFile.readLines()
+                .firstOrNull { it.startsWith("applicationId=") }
+                ?.substringAfter("=")
+                ?.trim()
+                ?: "com.lottery.branch1"
+        } else {
+            "com.lottery.branch1"
+        }
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:lottery/core/config.dart';
 import 'package:lottery/feature/login-register/service/auth_service.dart';
 import 'register.dart';
 
@@ -66,17 +67,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   child: Column(
                     children: [
-                      Container(
-                        width: 80,
-                        height: 80,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF2C5F5F),
-                          borderRadius: BorderRadius.circular(40),
-                        ),
-                        child: const Icon(
-                          Icons.casino,
-                          color: Colors.white,
-                          size: 40,
+                      ClipOval(
+                        child: Image.asset(
+                          SupabaseConfig.appLogoAsset,
+                          width: 80,
+                          height: 80,
+                          fit: BoxFit.cover,
                         ),
                       ),
                       const SizedBox(height: 16),

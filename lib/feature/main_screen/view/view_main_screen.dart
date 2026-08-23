@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:lottery/core/config.dart';
 import '../service/data_service.dart';
 // import 'បញ្ជីផុតម៉ោង.dart';
 import 'បញ្ជី.dart';
@@ -63,7 +64,7 @@ class MainScreen extends StatelessWidget {
   Widget _buildLogoSection() {
     return ClipOval(
       child: Image.asset(
-        'assets/logo2.png',
+        SupabaseConfig.appLogoAsset,
         width: 220,
         height: 220,
         fit: BoxFit.contain,

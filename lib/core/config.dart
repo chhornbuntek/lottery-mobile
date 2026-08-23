@@ -4,10 +4,13 @@ import 'receipt_image_template.dart';
 /// (`branch1`, `branch2`, `branch3`, or `branch4`).
 class SupabaseConfig {
   /// Visible app build label for QA/client verification.
-  static const String appBuildLabel = '1.0.1+6';
+  static const String appBuildLabel = '1.0.1+7';
 
-  /// Set to `branch1`, `branch2`, `branch3`, or `branch4` — no build flags needed.
-  static const String activeBranch = 'branch3';
+  /// Backend + in-app logo follow this value.
+  /// Do not edit by hand when building APK — the command sets it:
+  ///   dart run tool/prepare_branch.dart branch3
+  /// That writes `activeBranch` (Supabase URL), logo, splash, and package id.
+  static const String activeBranch = 'branch4';
 
   static String get supabaseUrl {
     switch (activeBranch) {
@@ -53,18 +56,23 @@ class SupabaseConfig {
   static const String _branch4AnonKey =
       'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzgyOTE2NjcwLCJleHAiOjE5NDA1OTY2NzB9.l4tZ5NzMIE0Y-UEBeff_e7KqaLaZeo5gJUlcWZzOBis';
 
-  /// Receipt header logo in `assets/` (add the file for branch3 — e.g. `logo-branch3.jpg`).
-  static String get receiptLogoAsset {
+  /// Home / launcher / receipt logo in `assets/`.
+  static String get appLogoAsset {
     switch (activeBranch) {
-      case 'branch3':
-        return 'assets/logo-branch3.jpg';
-      case 'branch4':
-      case 'branch2':
       case 'branch1':
+        return 'assets/logo_branch1.jpg';
+      case 'branch3':
+        return 'assets/logo_branch3.jpg';
+      case 'branch4':
+        return 'assets/logo_branch4.jpg';
+      case 'branch2':
       default:
         return 'assets/logo2.png';
     }
   }
+
+  /// Receipt header logo — same asset as the home logo.
+  static String get receiptLogoAsset => appLogoAsset;
 
   /// branch1 / branch3 / branch4 → image header/footer receipt.
   /// branch2 → original code-designed receipt (logo + table + footer).

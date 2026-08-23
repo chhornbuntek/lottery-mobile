@@ -8,7 +8,7 @@
 PRODUCT_NAME = lottery
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.lottery.app
+PRODUCT_BUNDLE_IDENTIFIER = com.lottery.branch4
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2025 com.lottery.app. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2025 com.lottery.branch1. All rights reserved.

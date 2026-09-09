@@ -654,51 +654,17 @@ class _BettingScreenState extends State<BettingScreen> {
     String numberType = isTwoDigit ? '2 លេខ' : (isThreeDigit ? '3 លេខ' : '');
     if (numberType.isNotEmpty) {
       try {
-        final moneyLimit = await BetsApi.getMoneyLimit(
-          time: _selectedLotteryTime!.timeName,
+        final violation = await BetsApi.findMoneyLimitViolation(
+          lotteryTime: _selectedLotteryTime!.timeName,
           numberType: numberType,
+          numbers: _expandedNumbers,
+          amountPerNumber: amountPerNumber,
         );
-
-        if (moneyLimit != null) {
-          // Get all existing bets for the same lottery time and date
-          final existingBets = await BetsApi.getAllBetsByDate(
-            date: DateTime.now(),
-            billType: _selectedBill,
-            lotteryTime: _selectedLotteryTime!.timeName,
-          );
-
-          // Calculate total amount per number across all existing bets
-          Map<String, int> totalAmountPerNumber = {};
-          for (var bet in existingBets) {
-            final betNumbers = bet['bet_numbers'] as List<dynamic>? ?? [];
-            final betAmountPerNumber = bet['amount_per_number'] as int? ?? 0;
-
-            for (var number in betNumbers) {
-              final numberStr = number.toString();
-              totalAmountPerNumber[numberStr] =
-                  (totalAmountPerNumber[numberStr] ?? 0) + betAmountPerNumber;
-            }
-          }
-
-          // Check each number in the new bet
-          for (var number in _expandedNumbers) {
-            final existingTotal = totalAmountPerNumber[number] ?? 0;
-            final newTotal = existingTotal + amountPerNumber;
-
-            if (newTotal > moneyLimit) {
-              Get.snackbar(
-                'កំហុស',
-                'លេខ $number: ចំនួនប្រាក់លើសពីកម្រិត! សរុបបច្ចុប្បន្ន: ${existingTotal.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛ + ${amountPerNumber.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛ = ${newTotal.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛ > ${moneyLimit.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛',
-                backgroundColor: Colors.red,
-                colorText: Colors.white,
-                duration: const Duration(seconds: 5),
-              );
-              return;
-            }
-          }
+        if (violation != null) {
+          _showTopErrorSnackBar(violation.khmerMessage);
+          return;
         }
       } catch (e) {
-        // If error fetching limit, allow betting (fail open)
         print('Error checking money limit: $e');
       }
     }
@@ -2757,61 +2723,22 @@ class _BettingScreenState extends State<BettingScreen> {
           : (isThreeDigitForLimit ? '3 លេខ' : '');
       if (numberTypeForLimit.isNotEmpty && _selectedLotteryTime != null) {
         try {
-          final moneyLimit = await BetsApi.getMoneyLimit(
-            time: _selectedLotteryTime!.timeName,
+          final violation = await BetsApi.findMoneyLimitViolation(
+            lotteryTime: _selectedLotteryTime!.timeName,
             numberType: numberTypeForLimit,
+            numbers: expandedBetNumbers,
+            amountPerNumber: amountPerNumber,
+            excludeBetId: _editingBetId,
+            excludeSource: _betBeingEdited?['source'] as String?,
           );
-
-          if (moneyLimit != null) {
-            // Get all existing bets for the same lottery time and date
-            final existingBets = await BetsApi.getAllBetsByDate(
-              date: DateTime.now(),
-              billType: _selectedBill,
-              lotteryTime: _selectedLotteryTime!.timeName,
-            );
-
-            // Calculate total amount per number across all existing bets
-            // Exclude the current bet being edited
-            Map<String, int> totalAmountPerNumber = {};
-            for (var bet in existingBets) {
-              final betId = bet['id'] as int?;
-              // Skip the current bet being edited
-              if (betId == _editingBetId) continue;
-
-              final betNumbers = bet['bet_numbers'] as List<dynamic>? ?? [];
-              final betAmountPerNumber = bet['amount_per_number'] as int? ?? 0;
-
-              for (var number in betNumbers) {
-                final numberStr = number.toString();
-                totalAmountPerNumber[numberStr] =
-                    (totalAmountPerNumber[numberStr] ?? 0) + betAmountPerNumber;
-              }
-            }
-
-            // Check each number in the edited bet
-            for (var number in expandedBetNumbers) {
-              final existingTotal = totalAmountPerNumber[number] ?? 0;
-              final newTotal = existingTotal + amountPerNumber;
-
-              if (newTotal > moneyLimit) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      'លេខ $number: ចំនួនប្រាក់លើសពីកម្រិត! សរុបបច្ចុប្បន្ន: ${existingTotal.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛ + ${amountPerNumber.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛ = ${newTotal.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛ > ${moneyLimit.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛',
-                    ),
-                    backgroundColor: Colors.red,
-                    duration: const Duration(seconds: 5),
-                  ),
-                );
-                setState(() {
-                  _isSaving = false;
-                });
-                return;
-              }
-            }
+          if (violation != null) {
+            _showTopErrorSnackBar(violation.khmerMessage);
+            setState(() {
+              _isSaving = false;
+            });
+            return;
           }
         } catch (e) {
-          // If error fetching limit, allow betting (fail open)
           print('Error checking money limit: $e');
         }
       }
@@ -3223,48 +3150,15 @@ class _BettingScreenState extends State<BettingScreen> {
     int amountPerNumber = int.tryParse(_amountController.text) ?? 0;
     if (numberType.isNotEmpty) {
       try {
-        final moneyLimit = await BetsApi.getMoneyLimit(
-          time: groupLotteryTime,
+        final violation = await BetsApi.findMoneyLimitViolation(
+          lotteryTime: groupLotteryTime,
           numberType: numberType,
+          numbers: _expandedNumbers,
+          amountPerNumber: amountPerNumber,
         );
-
-        if (moneyLimit != null) {
-          // Get all existing bets for the same lottery time and date
-          final existingBets = await BetsApi.getAllBetsByDate(
-            date: DateTime.now(),
-            billType: _selectedBill,
-            lotteryTime: groupLotteryTime,
-          );
-
-          // Calculate total amount per number across all existing bets
-          Map<String, int> totalAmountPerNumber = {};
-          for (var bet in existingBets) {
-            final betNumbers = bet['bet_numbers'] as List<dynamic>? ?? [];
-            final betAmountPerNumber = bet['amount_per_number'] as int? ?? 0;
-
-            for (var number in betNumbers) {
-              final numberStr = number.toString();
-              totalAmountPerNumber[numberStr] =
-                  (totalAmountPerNumber[numberStr] ?? 0) + betAmountPerNumber;
-            }
-          }
-
-          // Check each number in the new bet
-          for (var number in _expandedNumbers) {
-            final existingTotal = totalAmountPerNumber[number] ?? 0;
-            final newTotal = existingTotal + amountPerNumber;
-
-            if (newTotal > moneyLimit) {
-              Get.snackbar(
-                'កំហុស',
-                'លេខ $number: ចំនួនប្រាក់លើសពីកម្រិត! សរុបបច្ចុប្បន្ន: ${existingTotal.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛ + ${amountPerNumber.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛ = ${newTotal.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛ > ${moneyLimit.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} ៛',
-                backgroundColor: Colors.red,
-                colorText: Colors.white,
-                duration: const Duration(seconds: 5),
-              );
-              return;
-            }
-          }
+        if (violation != null) {
+          _showTopErrorSnackBar(violation.khmerMessage);
+          return;
         }
       } catch (e) {
         print('Error checking money limit: $e');

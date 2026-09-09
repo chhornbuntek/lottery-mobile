@@ -849,6 +849,138 @@ class BetsApi {
     }
   }
 
+  static int _asInt(dynamic value) {
+    if (value == null) return 0;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString()) ?? 0;
+  }
+
+  static String _formatDate(DateTime date) =>
+      '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+
+  /// Daily totals per bet number for [lotteryTime] from both `pending_bets` and `bets`.
+  /// Combines **all agents** via SECURITY DEFINER RPC (not limited by RLS to current user).
+  static Future<Map<String, int>> getDailyAmountTotalsPerNumber({
+    required DateTime date,
+    required String lotteryTime,
+    int? excludeBetId,
+    String? excludeSource, // 'pending_bets' | 'bets'
+  }) async {
+    final formattedDate = _formatDate(date);
+    final totals = <String, int>{};
+
+    void addFromRpc(List<dynamic> rows) {
+      for (final raw in rows) {
+        final row = Map<String, dynamic>.from(raw as Map);
+        final number = row['bet_number']?.toString();
+        if (number == null || number.isEmpty) continue;
+        totals[number] = _asInt(row['total_amount']);
+      }
+    }
+
+    try {
+      final response = await _supabase.rpc(
+        'get_daily_amount_totals_per_number',
+        params: {
+          'p_bet_date': formattedDate,
+          'p_lottery_time': lotteryTime,
+          'p_exclude_pending_id':
+              excludeSource == 'pending_bets' ? excludeBetId : null,
+          'p_exclude_bet_id': excludeSource == 'bets' ? excludeBetId : null,
+        },
+      );
+      addFromRpc(response as List<dynamic>? ?? const []);
+      return totals;
+    } catch (e) {
+      // Fallback if RPC is not installed yet: still query both tables without
+      // user_id filter (works only if RLS allows reading other agents).
+      print('RPC get_daily_amount_totals_per_number failed, fallback: $e');
+    }
+
+    void addRows(List<dynamic> rows, {required bool isPending}) {
+      for (final raw in rows) {
+        final bet = Map<String, dynamic>.from(raw as Map);
+        final betId = _asInt(bet['id']);
+        if (excludeBetId != null &&
+            betId == excludeBetId &&
+            ((isPending && excludeSource == 'pending_bets') ||
+                (!isPending && excludeSource == 'bets') ||
+                excludeSource == null)) {
+          continue;
+        }
+
+        final betNumbers = bet['bet_numbers'] as List<dynamic>? ?? [];
+        final amount = _asInt(bet['amount_per_number']);
+        for (final number in betNumbers) {
+          final numberStr = number.toString();
+          totals[numberStr] = (totals[numberStr] ?? 0) + amount;
+        }
+      }
+    }
+
+    final pending = await _supabase
+        .from('pending_bets')
+        .select('id, bet_numbers, amount_per_number')
+        .eq('bet_date', formattedDate)
+        .eq('lottery_time', lotteryTime);
+
+    final paid = await _supabase
+        .from('bets')
+        .select('id, bet_numbers, amount_per_number')
+        .eq('bet_date', formattedDate)
+        .eq('lottery_time', lotteryTime);
+
+    addRows(pending, isPending: true);
+    addRows(paid, isPending: false);
+    return totals;
+  }
+
+  /// Returns the first number that would exceed the daily money limit, or null if OK.
+  /// Totals include **all agents** for that lottery time / day.
+  /// When no money_limit row exists, returns null (allow).
+  static Future<MoneyLimitViolation?> findMoneyLimitViolation({
+    required String lotteryTime,
+    required String numberType,
+    required List<String> numbers,
+    required int amountPerNumber,
+    DateTime? date,
+    int? excludeBetId,
+    String? excludeSource,
+  }) async {
+    if (numbers.isEmpty || amountPerNumber <= 0 || numberType.isEmpty) {
+      return null;
+    }
+
+    final moneyLimit = await getMoneyLimit(
+      time: lotteryTime,
+      numberType: numberType,
+    );
+    if (moneyLimit == null) return null;
+
+    final totals = await getDailyAmountTotalsPerNumber(
+      date: date ?? DateTime.now(),
+      lotteryTime: lotteryTime,
+      excludeBetId: excludeBetId,
+      excludeSource: excludeSource,
+    );
+
+    for (final number in numbers) {
+      final existingTotal = totals[number] ?? 0;
+      final newTotal = existingTotal + amountPerNumber;
+      if (newTotal > moneyLimit) {
+        return MoneyLimitViolation(
+          number: number,
+          existingTotal: existingTotal,
+          amountPerNumber: amountPerNumber,
+          newTotal: newTotal,
+          moneyLimit: moneyLimit,
+        );
+      }
+    }
+    return null;
+  }
+
   /// Get bet groups summary by date for current user
   /// Returns aggregated groups with total_amount pre-calculated
   static Future<List<Map<String, dynamic>>> getBetGroupsSummary({
@@ -1154,11 +1286,46 @@ class BetsApi {
         return null;
       }
 
-      final limitStr = response['limit_per_number'] as String? ?? '';
-      return int.tryParse(limitStr);
+      final limitRaw = response['limit_per_number'];
+      if (limitRaw is int) return limitRaw;
+      if (limitRaw is num) return limitRaw.toInt();
+      return int.tryParse(limitRaw?.toString() ?? '');
     } catch (e) {
       print('Error fetching money limit: $e');
       return null; // Return null on error (fail open - allow betting)
     }
   }
+}
+
+class MoneyLimitViolation {
+  final String number;
+  final int existingTotal;
+  final int amountPerNumber;
+  final int newTotal;
+  final int moneyLimit;
+
+  const MoneyLimitViolation({
+    required this.number,
+    required this.existingTotal,
+    required this.amountPerNumber,
+    required this.newTotal,
+    required this.moneyLimit,
+  });
+
+  String get khmerMessage {
+    final existing = _fmt(existingTotal);
+    final limit = _fmt(moneyLimit);
+    if (existingTotal >= moneyLimit) {
+      return 'លេខ $number បានដល់កម្រិតទឹកប្រាក់ប្រចាំថ្ងៃហើយ '
+          '(សរុប $existing ៛ / កម្រិត $limit ៛) — មិនអាចចាក់បន្ថែមបានទេ';
+    }
+    return 'លេខ $number បានដល់កម្រិតទឹកប្រាក់ប្រចាំថ្ងៃហើយ '
+        '(សរុប $existing ៛ + ${_fmt(amountPerNumber)} ៛ លើសកម្រិត $limit ៛) '
+        '— មិនអាចចាក់បានទេ';
+  }
+
+  static String _fmt(int n) => n.toString().replaceAllMapped(
+        RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+        (m) => '${m[1]},',
+      );
 }
